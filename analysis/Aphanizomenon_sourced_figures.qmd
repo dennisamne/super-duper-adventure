@@ -1,0 +1,323 @@
+---
+title: "Aphanizomenon_sourced_figures"
+author: "Dennis Amnebrink"
+affiliation-title: "Linnaeus University"
+title-block-banner: true
+date: now
+editor: visual
+toc: true
+prefer-html: true
+number-sections: true
+format:
+  html:
+     code-fold: true
+     self-contained: true
+---
+
+```{r}
+#| label: libraries
+#| warning: false
+library(data.table)
+library(tidyverse)
+library(vegan)
+library(rain)
+library(ggConvexHull)
+library(DT)
+```
+
+```{r}
+#| label: colourscheme treatments
+#| warning: false
+GEOM_COL_COLOURS = c(
+  RColorBrewer::brewer.pal(12, name = 'Paired'))
+
+SEASON_COLOURS = c("spring" = "#33A02C", "summer" = "#E31A1C",  "autumn" =  "#FF7F00", "winter" = "#1F78B4")
+```
+
+```{r}
+#| label: files
+#| warning: false
+#| cache: true
+# Loading annotation file
+  eggnog_names <- c("Geneid", "MAG", "contig", "Start", "End", "Strand", "Length", "seed_eggNOG_ortholog", "seed_ortholog_evalue", "seed_ortholog_score", "Predicted_taxonomic_group", "Predicted_protein_name", "Gene_Ontology_terms", "EC_number", "KEGG_ko", "KEGG_Pathway", "KEGG_Module", "KEGG_Reaction", "KEGG_rclass", "BRITE", "KEGG_TC", "CAZy", "BiGG Reaction", "tax_scope:eggNOG_taxonomic_level_used_for_annotation", "eggNOG_OGs", "bestOG", "COG_Functional_Category", "eggNOG_free_text_description", "sample", "counts")
+  
+  eggnog_table <- read_tsv("../data/eggnog_table_long.tsv.gz", col_types = cols(Start = col_integer(), End = col_integer(), Length = col_integer(), counts = col_integer(), X7 = col_character())) %>%
+                             separate(Chr, c("MAG", "contig"), sep ="_k", remove = TRUE)
+  eggnog_table$sample <- sub('.non_rRNA.pe.bowtie2.q5', '', eggnog_table$sample)
+   eggnog_table$sample <- sub('.ca.pesickle.pe.bowtie2.sorted.unmappedpairs.pe.bowtie2.q5', '', eggnog_table$sample) 
+   eggnog_table$sample <- sub('.lane00[0-9].ca.pesickle.pe.bowtie2.q5', '', eggnog_table$sample) 
+   eggnog_table$sample <- sub("^", "P", eggnog_table$sample)
+   eggnog_table$sample <- sub("PP", "P", eggnog_table$sample)
+   eggnog_table$sample <- sub(".sorted.bam", "", eggnog_table$sample)
+   
+   colnames(eggnog_table) <- eggnog_names
+   
+   # Loading date file/sample key
+   lmo_id_date <- read_tsv("../data/lmo_id_date.tsv.gz") %>%
+    dplyr::select(1, 2) %>% 
+    dplyr::rename(dates=2) %>%
+    dplyr::rename(sample="Sample") %>%
+    mutate(season = ifelse(grepl("201[0-9]-0[3-5]-", dates), "spring",
+                           ifelse(grepl("201[0-9]-0[6-8]-", dates), "summer",
+                                  ifelse(grepl("201[0-9]-09-|201[0-9]-10-|201[0-9]-11-", dates), "autumn", "winter")))) %>%
+    mutate(filter_frac = ifelse(grepl("201[2-5]", dates), "filtered", "unfiltered")) %>%
+    mutate(year = str_extract(dates, "[0-9][0-9][0-9][0-9]"))
+  lmo_id_date$sample <- sub('P12052_1', 'P12052_3', lmo_id_date$sample) 
+  
+  #Taxonomy file
+  BACL_taxonomy <- read_tsv("../data/BACL_identities.tsv.gz") %>%
+    separate("Taxonomy", c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), sep = ";[a-z]__", remove = T) %>%
+    mutate(location = ifelse(grepl("*P2236*",MAG ), "redox",
+                             ifelse(grepl("*P1994*", MAG), "transect",
+                                    ifelse(grepl("*SRR*", MAG), "askö", "LMO"))))
+  
+  # Orf-file
+cds_table<- read_tsv("../data/cds_counts_filtered.tsv")
+```
+
+```{r}
+#| label: filtering-low-abundant-dates
+#| warning: false
+#| cache: true
+
+genes_and_paths_top50 <- cds_table %>% 
+  inner_join(lmo_id_date, by = "sample") %>%
+  dplyr::filter(filter_frac == "unfiltered") %>%
+  group_by(dates, Geneid, MAG) %>% 
+  summarise(counts = as.integer(mean(counts))) %>%
+  ungroup() %>%
+  inner_join(cds_table %>% distinct(Geneid, Length)) %>%
+  group_by(MAG, dates) %>%
+  mutate(t = counts/Length) %>%
+  mutate(tpm = t/sum(t)*1e6) %>%
+  ungroup() %>%
+  dplyr::select(-t) %>%
+  filter(MAG == "P1994_122_bin236") 
+ 
+cds_table_filtered <- cds_table %>%  inner_join(lmo_id_date, by = "sample") %>% dplyr::filter(filter_frac == "unfiltered") %>% group_by(dates, MAG, Geneid) %>% summarise(counts = mean(counts)) %>% ungroup() %>% group_by(MAG, dates) %>% summarise(counts = sum(counts)) %>% ungroup() %>% dplyr::filter(counts >= 3000)
+
+genes_and_paths_top50 %>% semi_join(cds_table_filtered, by = c("MAG","dates")) -> filtered_genes_and_paths_top50
+```
+
+## PCA/nMDS
+
+PCA plotting of Aphanizomenon orf-level expression produces a clear separation between summer time expression and the three other seasons (@fig-PCA_orf_level).
+
+```{r}
+#| label: fig-PCA_orf_level
+#| warning: false
+#| fig-cap: "PCA of orf-level functional expression for Aphanizomenon during years 2016-2017. Colours denote season and shape year."
+orf_mat <- filtered_genes_and_paths_top50 %>%
+  filter(MAG == "P1994_122_bin236") %>%
+  select(dates, Geneid, counts) %>%
+  pivot_wider(names_from ="Geneid", values_from = counts, values_fill = 0) %>%
+  column_to_rownames("dates") %>%
+  as.matrix()
+
+# Hellinger transformation and then bray-curtis distances
+
+PCA <- rda(decostand(orf_mat, method = "hellinger"), distance = "bray")
+
+eigenvalues <- as.data.frame(PCA$CA$eig) %>%
+    rownames_to_column("PC_axes") %>%
+    rename(eigenvalues = "PCA$CA$eig") %>%
+    mutate(eigenvalues_variation_explained = (eigenvalues/sum(eigenvalues) * 100))
+
+pca_df <- as.data.frame(PCA$CA$u) %>%
+  rownames_to_column("dates") %>%
+  mutate(dates = as.Date(dates)) %>%
+  inner_join(lmo_id_date %>% distinct(dates, season), by = "dates") %>%
+  as.data.frame()
+
+pca_df %>%
+  mutate(dates2 = str_extract(dates, "[0-9][0-9]-[0-9][0-9]$")) %>%
+  mutate(year = str_extract(dates, "[0-9][0-9][0-9][0-9]")) %>%
+  ggplot(mapping = aes(x = PC1, y = PC2, text = dates2, colour = season, fill = season, label = dates2, shape = year)) +
+  geom_point() +
+  geom_text(nudge_x = 0.01, size = 3) +
+  scale_colour_manual('Season',values = SEASON_COLOURS) +
+  scale_fill_manual('Season',values = SEASON_COLOURS) +
+  scale_shape_manual('Year', values = c(16,17)) +
+  xlab(paste("PC1", round(eigenvalues$eigenvalues_variation_explained[1], digits = 2),"%", sep = " ")) +
+  ylab(paste("PC2", round(eigenvalues$eigenvalues_variation_explained[2], digits = 2),"%", sep = " ")) +
+  theme_minimal() +
+  theme(panel.grid = element_blank()) +
+  geom_vline(xintercept = 0, linetype = "dashed", size = 0.5) +
+  geom_hline(yintercept=0, linetype="dashed", size = 0.5) +
+  geom_convexhull(aes(x = PC1, y = PC2, group = season, fill = season), alpha = 0.2, show.legend = FALSE)
+```
+
+## Rain
+
+```{r rain_final_52_weeks_orf_level}
+#| label: rain-run
+#| warning: false
+#| cache: true
+for_rain <- cds_table %>%
+    inner_join(lmo_id_date, by = "sample") %>%
+    filter(filter_frac == "unfiltered") %>%
+    filter(MAG == "P1994_122_bin236") %>%
+    group_by(MAG, dates) %>%
+    mutate(t = counts/Length) %>%
+    mutate(tpm = t/sum(t)*1e6) %>%
+    ungroup() %>%
+    select(-t) %>%
+    group_by(Geneid, MAG, dates) %>%
+    summarise(tpm = sum(tpm)) %>%
+    ungroup()
+
+# Before the loop
+all_weeks <- as.data.frame(seq(from = 1, to = 104, by = 1)) 
+
+colnames(all_weeks) <- "week"
+
+mag_list = list()
+
+sig_cor_mag <- "P1994_122_bin236"
+
+# Making the table again with counts, to exclude low counts, use this as a semijoin by Geneid beforfe spreading
+
+counts_filter <- cds_table %>%
+    inner_join(lmo_id_date, by = "sample") %>%
+    filter(filter_frac == "unfiltered") %>%
+    filter(MAG == "P1994_122_bin236") %>%
+    group_by(MAG, dates, Geneid) %>%
+    mutate(counts = mean(counts)) %>%
+    ungroup() %>%
+    select(Geneid, counts, dates) %>%
+    group_by(Geneid) %>%
+    summarise(tot_counts = sum(counts)) %>%
+    ungroup() %>%
+    filter(tot_counts > 100)
+
+counts_filter2 <- cds_table %>%
+    inner_join(lmo_id_date, by = "sample") %>%
+    filter(filter_frac == "unfiltered") %>%
+    filter(MAG == "P1994_122_bin236") %>%
+    group_by(MAG, dates, Geneid) %>%
+    mutate(counts = mean(counts)) %>%
+    ungroup() %>%
+    select(Geneid, counts, dates) %>%
+    semi_join(counts_filter, by = "Geneid") %>%
+    group_by(Geneid) %>%
+    tally() %>%
+    ungroup() %>%
+    filter(n > 2)
+  
+
+# This works, now make the argument for counts in 2 samples or less, e.g counts != 0 in 
+mag_time_points <- for_rain %>%
+  mutate(year_day = julian(dates, origin = as.Date("2016-01-01"))) %>%
+  mutate(week = ceiling(year_day/7))  %>%
+  semi_join(filtered_genes_and_paths_top50, by = c("MAG","dates")) %>%
+  semi_join(counts_filter, by = "Geneid") %>%
+  filter(MAG == "P1994_122_bin236") %>%
+  select(week, Geneid, tpm) %>%
+  spread(Geneid, tpm, fill = 0)
+
+# Tally 
+
+ mag_time_points <- mag_time_points  %>% 
+ column_to_rownames("week") 
+
+for (n in sig_cor_mag) {
+  
+  # IN the loop
+mag_time_points <- for_rain %>%
+  mutate(year_day = julian(dates, origin = as.Date("2016-01-01"))) %>%
+  mutate(week = ceiling(year_day/7))  %>%
+  semi_join(filtered_genes_and_paths_top50, by = c("MAG","dates")) %>%
+  semi_join(counts_filter2, by = "Geneid") %>%
+  filter(MAG == n) %>%
+  select(week, Geneid, tpm) %>%
+  spread(Geneid, tpm, fill = 0) 
+
+# Joining in to create the measure.sequence vector
+vec <- all_weeks %>%
+  left_join(mag_time_points, by = "week") %>%
+  column_to_rownames("week") %>%
+  replace(is.na(.), 0) %>%
+  mutate(vector = ifelse(rowSums(.) > 0, 1,0)) %>%
+  select(vector)
+
+mag_time_points <- mag_time_points  %>% column_to_rownames("week") %>%
+  as.matrix()
+
+
+mag_list[[n]] <- rain::rain(mag_time_points, deltat = 1, period = 52, nr.series = 1 , measure.sequence= vec$vector)
+
+print(n)
+}
+
+bind_rows(mag_list, .id = "mag") -> df
+# Done on filtered dates > 3000 counts
+df %>%
+  mutate(fdr = p.adjust(pVal, method = "fdr")) %>%
+  rownames_to_column("Geneid") %>% 
+  select(-mag) %>%
+  mutate(type = ifelse(fdr >= 0.05, "non-sig","sig")) %>%
+  write_tsv(.,"../data/cyclical_genes_aphani.tres.tsv")
+
+cyc.genes.tres <- read_tsv("../data/cyclical_genes_aphani.tres.tsv")
+```
+
+To identify seasonal expression patterns, a RAIN analysis on the orf-level of Aphanizomenon revealed that `r length(which(cyc.genes.tres$fdr <= 0.05))` out of `r nrow(cyc.genes.tres)` showed significant seasonal expression patterns. The annotation of every orf and its corresponding fdr-adjusted p-value is provided in table 
+@fig-Rain_table_supp. (Quarto doesn't recognize datatable-output as a table so bear with me here).
+Analysis was run on the within-mag normalised tpm values (all genes in the MAG summarised per date adds up to a million).
+
+```{r}
+#| label: fig-Rain_table_supp
+#| fig-cap: Table summarising RAIN output on the Aphanizomenon orf-level analysis.
+#| warning: false
+
+DT::datatable(cyc.genes.tres %>% 
+        left_join(eggnog_table %>% distinct(Geneid, Predicted_protein_name , eggNOG_free_text_description), 
+                  by = "Geneid") %>%
+        arrange(Predicted_protein_name), filter = "top")  
+```
+
+Following this, the seasonality of all the significant genes was identified based on their max expression value date (I.e the season of the date with highest expression determined the seasonality of a particular gene). Adding a smoothing function the temporal optima becomes clear, but even plotting every individual gene together produce a simiar result @fig-rain_genes. I have a slight suspicion that the summer cluster is correlated with a higher growth, I think the small bump seen in winter might correlate with the higher phytoplankton counts on the 15th of Feb in 2017. (**VERIFY THIS**).
+
+```{r}
+#| label: fig-rain_genes
+#| fig-cap: Z-score normalised expression of Aphanizomenon orfs that were significant in RAIN.
+#| fig-subcap: 
+#|   - "Smoothing function summarising the seasonal clusters"
+#|   - "Plotting every orf individually and colouring it according to the season of highest expression."
+#| warning: false
+
+#Identification of seasonality among the significant genes.
+season_info <- filtered_genes_and_paths_top50 %>%
+  group_by(Geneid) %>%
+  filter(tpm == max(tpm)) %>%
+  ungroup() %>%
+  inner_join(lmo_id_date %>% distinct(dates, season), by = "dates") %>%
+  select(Geneid, season)
+
+filtered_genes_and_paths_top50 %>%
+  inner_join(season_info, by = "Geneid") %>%
+  group_by(Geneid) %>%
+  mutate(zscore = (tpm - mean(tpm))/ sd(tpm) ) %>%
+  ungroup() %>%
+  semi_join(cyc.genes.tres %>% filter(type == "sig"), by = "Geneid") %>%
+  ggplot(mapping = aes(x = dates, y = zscore, colour = season)) +
+  theme_bw() +
+  theme(panel.grid = element_blank()) +
+  geom_smooth() +
+  scale_colour_manual('Season', values = SEASON_COLOURS)
+
+# Unsmoothed version
+filtered_genes_and_paths_top50 %>%
+  inner_join(season_info, by = "Geneid") %>%
+  group_by(Geneid) %>%
+  mutate(zscore = (tpm - mean(tpm))/ sd(tpm) ) %>%
+  ungroup() %>%
+  semi_join(cyc.genes.tres %>% filter(type == "sig"), by = "Geneid") %>%
+  ggplot(mapping = aes(x = dates, y = zscore, colour = season, group = Geneid)) +
+  theme_bw() +
+  geom_line() +
+  scale_colour_manual('Season', values = SEASON_COLOURS)
+```
+
+## Genes of interest in each of these clusters???
+
