@@ -1,11 +1,510 @@
 ---
-title: "16sTimeSeries"
-format: html
+title: "16S time series"
+author: "Dennis Amnebrink"
+affiliation-title: "Linnaeus University"
+title-block-banner: true
+date: now
 editor: visual
+toc: true
+prefer-html: true
+number-sections: true
+format:
+  html:
+     code-fold: true
+     self-contained: true
 ---
 
+# 16S data overview
+
+This project focuses on the ASV dynamics of the *Aphanizomenon* in the 0.2 µm-fraction at the LMO-station from 2011-03-25 to 2019-12-17. Counts represented per each date is calculated as mean of replicates when available, relative abundances are also based on the mean of replicates. A.Andersson project is low counts, this is for years 2011 and 13.
+
 ```{r}
+#| label: libraries
+#| warning: false
 library(data.table)
 library(tidyverse)
+library(vegan)
+library(kableExtra)
 ```
 
+```{r}
+#| label: colourscheme treatments
+#| warning: false
+GEOM_COL_COLOURS = c(
+  RColorBrewer::brewer.pal(12, name = 'Paired'))
+
+YEAR_COLOURS = c("2011" = "#A6CEE3","2012" = "#1F78B4", "2013" = "#B2DF8A","2014" = "#33A02C", "2015" = "#FB9A99", "2016" = "#E31A1C", "2017" = "#FDBF6F", "2018" = "#FF7F00", "2019" = "#CAB2D6")
+
+```
+
+```{r}
+#| label: file_loading
+#| warning: false
+
+asv_tables <- fread("../data/ampliseq.ASV_tables.tsv.gz", sep ="\t") # ASV counts per sample, also contains projects other than LMO, i.e "KB", which is for now removed due to the inner_join with sample_ID which LMO is the only project selected.
+
+asv_tax_species <- fread("../data/ampliseq.ASV_tax_species.tsv.gz", sep = "\t") %>% # GTDB SDBI (use this one) 
+mutate(ASV_name = paste0("ASV_",row_number())) # This is to use a better name than ASV kwengkdnsgpkjasdngfpk 
+
+barrnap <- fread("../data/ampliseq.barrnap.tsv.gz", sep = "\t")
+
+dada2 <- fread("../data/ampliseq.DADA2_stats.tsv.gz") # Some of these samples not passable at all. Go through properly and see if needed in analysis... Especially A.andersson project has issues.
+
+
+SILVA <- fread("../data/ampliseq.SILVA.ASV_tax.tsv.gz") # Different annotations with SILVA and the ASV_tax_species
+
+#Sample_ID - select the correct projects. I.e some have been replaced, J.Pinhassi_14_02 -> J.Pinhassi_20_04.
+# It looks like filtering out A.Andersson samples shouldn't greatly affect the time-series, still a delta of about two weeks.
+
+sample_ID <- fread("../data/jp_samples.tsv", sep = "\t") %>%
+  filter(seqtype == "16SDNA", filter_fraction == "0.2") %>%# Subsetting to relevant samples (308 LMO-samples for 16S at the 0.2µm fraction, so cool!)
+  select(-project) # Remove this information as it is conflicting with the other dataframe, and now project is irrelevant
+# Find / create a sample key for the 16s to actual dates. Check plate runs for decontam, and see if possible to apply from blanks. Should be specific for the samples where the blanks were used.
+
+#Rerun the data to subset on LMO-only to remove unnecessary operations, and filter out chloroplasts etc
+asv_tables <- asv_tables %>% 
+  semi_join(sample_ID, by = "sample")
+
+#Creating a unique ASV-name for each asv that is not "0145477917bfe723a3832c7c63a1853d" (deprecated, now using from tax file)
+#asv_legend <- asv_tables %>%
+#  distinct(ASV_ID) %>%
+ # mutate(ASV_ID = as_factor(ASV_ID) %>% fct_reorder(row_number())) %>% 
+ # mutate(ASV_name = paste0("ASV",row_number())) 
+```
+
+Out of 1159 SILVA aphanizomenon sequences, all are annotated as dolichospermum in the SBDI annotation... For sure they are the same then in this case, but how to proceed? There are a total of 1401 Dolichospermum in the SBDI annotation, treat these as the traditional dolichospermum??
+
+```{r}
+aphas <- SILVA %>%
+  filter(grepl("Aphanizomenon*",Genus)) %>%
+  pull(ASV_ID)
+
+#asv_tax_species %>%
+  #filter(ASV_ID %in% aphas) 
+```
+
+Investigating if samples failed QC or have unusually low sequence numbers @fig-dada2_overview. 
+
+```{r}
+#| label: fig-dada2_overview
+#| fig-cap: "Counts in the various steps, hard to see clear patterns"
+#| warning: false
+
+
+tmp <- dada2 %>%
+  filter(sample %in% unique(sample_ID$sample))
+
+dada2 %>%
+  filter(sample %in% unique(sample_ID$sample)) %>%
+  mutate(sample = as_factor(sample) %>% fct_reorder(nonchim, .desc = TRUE)) %>%
+  select(sample, DADA2_input, filtered, denoisedF, denoisedR, merged, nonchim) %>%
+  pivot_longer(cols = c(DADA2_input, filtered, denoisedF, denoisedR, merged, nonchim), names_to = "step", values_to = "reads") %>%
+  ggplot(mapping = aes(x = sample, y = reads)) +
+  geom_point() +
+  facet_wrap(~ step)
+```
+
+```{r}
+#| label: fig-countSeqProject
+#| fig-cap: "Clear that the ANderson project has failed, this is years 2011,2013. Dashed line is 10000 counts, for reference."
+#| warning: false
+#| fig-width: 25
+#clean this up
+dada2 %>%
+  filter(sample %in% unique(sample_ID$sample)) %>%
+  mutate(sample = as_factor(sample) %>% fct_reorder(nonchim, .desc = TRUE)) %>%
+  select(sample, DADA2_input, filtered, denoisedF, denoisedR, merged, nonchim) %>%
+  pivot_longer(cols = c(DADA2_input, filtered, denoisedF, denoisedR, merged, nonchim), names_to = "step", values_to = "reads") %>%
+  inner_join(sample_ID %>% distinct(sample, seqproject) %>% mutate(sample = as_factor(sample)), by = "sample") %>%
+  ggplot(mapping = aes(x = sample, y = reads)) +
+  geom_point() +
+  facet_grid(step ~ seqproject) +
+  theme(panel.grid.major.y = element_line(size = 1),
+        axis.text.y = element_text(size = 8, colour = "black"),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size = 7, face = "plain", colour = "black")
+        ) +
+  geom_hline(yintercept=10000, linetype="dashed", colour = "green", size = 0.5) 
+  
+```
+
+```{r}
+#| label: tbl-dada2
+#| fig-cap: "DADA2-table"
+#| warning: false
+#| eval: false
+
+kable(dada2) %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+
+```{r}
+#| label: something
+#| warning: false
+#| eval: false
+asv_tables %>%
+  inner_join(sample_ID, by = "sample") %>%
+  group_by(date) %>%
+  summarise(count = mean(count)) %>%
+  ungroup()
+```
+
+Proceeding with the subsetted Dolichos in the SBDI for now to look at dynamics.
+
+```{r}
+#| label: rarecurve
+#| warning: false
+#| eval: false
+sample_mat <- asv_tables %>%
+  semi_join(sample_ID, by = "sample") %>%
+  select(-project) %>%
+  pivot_wider(values_from = count, names_from = sample, values_fill = 0 ) %>%
+  column_to_rownames("ASV_ID") %>%
+  as.matrix()
+
+rarecurve(t(sample_mat), step = 100)
+```
+
+# Plotting of the Dolichospermum ASV's
+
+There is a total of 354 Dolichospermum ASV's partitioned among 9 different species, while some were determined only to genus level @fig-Nostoc_species. All years except 2015 were dominated by the D. Flosaquae, in 2015 a sequence only determined as Dolichospermum were highly expressed together with flosaquae and Dolichospermum sp00312705. Flosaquae peak abundance was usually achieved around July, ranging from \~ 20% to \> 40% of total ASV abundance. Some years the peak abundance is before July, others during or slighty after.
+
+2016 and 2017 relative abundances reach roughly 5 and 3 % in winter months. This matches peaks seen in transcriptomic MAG-data.
+
+```{r}
+#| label: fig-Nostoc_species
+#| fig-cap: species level dynamics of the genus Dolichospermum sp., all ASV's within a species were summarised to achieve these dynamics.
+#| warning: false
+
+relab_table <- asv_tables %>%
+  inner_join(sample_ID, by = "sample") %>%
+  group_by(date,ASV_ID) %>%
+  summarise(count = mean(count)) %>%
+  ungroup() %>%
+  group_by(date) %>%
+  mutate(relab = count/sum(count)) %>%
+  ungroup() 
+
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(Genus == "Dolichospermum") %>%
+  group_by(Species, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+  ggplot(mapping = aes(x = date, y = relab, group = Species, colour = Species)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ Year, scales = "free_x") +
+  scale_color_manual('Taxa', values = GEOM_COL_COLOURS) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        )
+```
+
+```{r}
+#| label: Nostoc_species2
+#| warning: false
+#| eval: false
+
+#Plotting all Flosaquae in one plot with different colours per year instead
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(Species == "Dolichospermum flosaquae") %>%
+  group_by(Species, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+  mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  ggplot(mapping = aes(x = year_day, y = relab, group = Species, colour = Year)) +
+  geom_line() +
+  geom_point() +
+  scale_color_manual('Year', values = GEOM_COL_COLOURS) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  facet_wrap(~ Year)
+```
+
+The important ASV's responsible for the species level dynamics in @fig-Nostoc_species were next identified by plotting all ASV's within the Dolichospermum flosaquae species. Among the flosaquae ASV's, it is largely one ASV (ASV131100) which is responsible for the dynamics @fig-Aph-species. 
+
+(Sidenote: So far still doubtful about 2011 and 2013 due to low read count inputs,but doesn't really interfere with dynamics so should be OK to keep them). For ASV identity, perhaps extract sequence and place in tree to try and resolve taxonomic identity. What did Dreher et al. 2021 say about 16S and ADA-4??)
+
+```{r}
+#| label: fig-Aph_species
+#| fig-cap: ASV-dynamics of all ASV's within the Dolichospermum flosaquae species.
+#| warning: false
+
+
+#Select ten most abundant ASV's based on mean relative abundance.
+
+top10 <- relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(Species == "Dolichospermum flosaquae") %>%
+  group_by(ASV_ID) %>%
+  summarise(relab = mean(relab)) %>%
+  ungroup() %>%
+  arrange(desc(relab)) %>%
+  slice(1:10) %>%
+  inner_join(asv_tax_species %>% distinct(ASV_ID, ASV_name), by = "ASV_ID") %>%
+  pull(ASV_name)
+  
+
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(Species == "Dolichospermum flosaquae") %>%
+  mutate(topASV = ifelse(ASV_name %in% top10, paste0(ASV_name), paste0("Other"))) %>%
+  group_by(topASV, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+  ggplot(mapping = aes(x = date, y = relab, group = topASV, colour = topASV)) +
+  geom_line() +
+  geom_point() +
+  scale_color_manual('Year', values = GEOM_COL_COLOURS) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  facet_wrap(~ Year, scales = "free_x") +
+  xlab("Date") +
+  ylab("Relative Abundance") +
+  scale_x_date(date_breaks = "2 months", date_labels = "%m")
+```
+
+The dominant ASV_131100 reaches peak-abundance in summer, from the period of Mid-June to end of July, with abundances ranging from ~9% up to > 40%. In December 2012 the ASV reaches peak abundance of > 30% in December. Keep in mind that rRNA copies of the filamentous cyanos are several (Mentioned in abstract of Dreher et al. 2021).
+```{r}
+#| layout-ncol: 2
+#| label: fig-Dominant_ASV_dynamics
+#| fig-cap: The relative abundance of the dominant ASV and it's temporal dynamics throughout the time-series.
+#| fig-subcap: 
+#|   - "All years included, triangles denote date of max expression for each year."
+#|   - "Removed low count years 2011/2013, triangles denote date of max expression for each year."
+#|   - "Smoothing function for all years."
+#|   - "Smoothing function excluding years 2011 and 2013."
+#| warning: false
+
+
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(ASV_name == "ASV_131100") %>%
+  group_by(ASV_name, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+  mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  group_by(Year) %>%
+  mutate(maxVal = ifelse(relab == max(relab), "max","not_max")) %>%
+  ungroup() %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2012-01-01")), y = relab, group = Year, colour = Year, shape = maxVal)) +
+  geom_line() +
+  geom_point() +
+  scale_color_manual('Year', values = YEAR_COLOURS) +
+  scale_shape_manual('', values = c(17,16), guide = "none") +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  xlab("Date") +
+  ylab("Relative Abundance") +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b")
+
+
+#The same figure again, but excluding 2011 and 2013
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(ASV_name == "ASV_131100") %>%
+  group_by(ASV_name, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+  mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  filter(!Year %in% c("2011","2013")) %>%
+  group_by(Year) %>%
+  mutate(maxVal = ifelse(relab == max(relab), "max","not_max")) %>%
+  ungroup() %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2012-01-01")), y = relab, group = Year, colour = Year, shape = maxVal)) +
+  geom_line() +
+  geom_point() +
+  scale_color_manual('Year', values = YEAR_COLOURS, drop = TRUE) +
+  scale_shape_manual('', values = c(17,16), guide = "none") +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  xlab("Date") +
+  ylab("Relative Abundance") +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b")
+
+#Smoothing function all years
+
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(ASV_name == "ASV_131100") %>%
+  group_by(ASV_name, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+  mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2012-01-01")), y = relab, group = ASV_name)) +
+  geom_smooth() +
+  scale_color_manual('Year', values = GEOM_COL_COLOURS) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  xlab("Date") +
+  ylab("Relative Abundance") +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b")
+
+
+#A smoothing function (one line and confidence interval)
+
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(ASV_name == "ASV_131100") %>%
+  group_by(ASV_name, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+  mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  filter(!Year %in% c("2011","2013")) %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab, group = ASV_name)) +
+  geom_smooth() +
+  scale_color_manual('Year', values = GEOM_COL_COLOURS) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  xlab("Date") +
+  ylab("Relative Abundance") +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b")
+```
+
+# Placement of 16S sequence in tree with known ADA-4 clade 16S sequences
+
+A quick blast of the sequence gives 100% identity fo Aphanizomenon flos-aquae in ncbi. Another way to verify this, I think SBDI taxonomy is based on 16S sequences from reference genomes only, if so a blast against this database and the identity of these genomes placed in the Dreher tree could answer this question well...
+
+Following figure 3 and table S2 in Dreher et al. (Our MAG does not have a 16S rRNA seq), known genomes in the ADA-4 clade (and their accessions) are: 
+NCBI accession numbers to known the sequenced genomes found are listed below: 
+
+Aphanizomenon flos-aquae DEX188 [CP051188](https://www.ncbi.nlm.nih.gov/nuccore/CP051188.1/)   
+
+Aphanizomenon flos-aquae CP01 [JABGCF000000000](https://www.ncbi.nlm.nih.gov/nuccore/JABGCF000000000.1/)   
+
+Aphanizomenon flos-aquae UKL13_PBmSP [LTEC02000000](https://www.ncbi.nlm.nih.gov/nuccore/LTEC00000000.2/)   
+The other reference genomes are not in table S2.
+
+Performing the blastn using query sequence of ASV_131100:    TGGGGAATTTTCCGCAATGGGCGAAAGCCTGACGGAGCAATACCGCGTGAGGGAGGAAGGCTCTTGGGTTGTAAACCTCTTTTCTCAGGGAAGAACAGAATGACGGTACCTGAGGAATAAGCATCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGATGCAAGCGTTATCCGGAATGATTGGGCGTAAAGGGTCCGCAGGTGGCATTGTAAGTCTGCTGTTAAAGAGTTTGGCTCAACCAAATAAGAGCAGTGGAAACTACAAAGCTAGAGTGTGGTCGGGGCAGAGGGAATTCCTGGTGTAGCGGTGAAATGCGTAGATATCAGGAAGAACACCAGTGGCGAAGGCGCTCTGCTAGGCCGAGACTGACACTGAGGGACGAAAGCTAGGGGAGCGAATG    
+
+Aphanizomenon flos-aquae DEX188 - 1 hit with 100% query coverage and 100% identity
+Aphanizomenon flos-aquae CP01 - no hits found even though it is reported to have 2 16S sequences.    
+Aphanizomenon flos-aquae UKL13_PBmSP - 3 hits with 100% query coverage, and 100, 99.51 and 99.01% identity respectively.   
+
+That seems to check out for two of the genomes, question then remains, is it distinguishable from other 16S sequences? Unfortunately it is hard to take it further after this. This also suggest that the two 16S sequences in CP01 are very different from the other members ADA-4 members.
+
+Sequences from Dolichospermum also end up in the ADA-4 clade, look at some of these to see coverage, should also have high similarity, then take some from for example ADA-3, which should be lower similarity then.
+
+```{r}
+#| label: ASV_16s_seq
+#| warning: false
+#| include: false
+#| eval: false
+#TGGGGAATTTTCCGCAATGGGCGAAAGCCTGACGGAGCAATACCGCGTGAGGGAGGAAGGCTCTTGGGTTGTAAACCTCTTTTCTCAGGGAAGAACAGAATGACGGTACCTGAGGAATAAGCATCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGATGCAAGCGTTATCCGGAATGATTGGGCGTAAAGGGTCCGCAGGTGGCATTGTAAGTCTGCTGTTAAAGAGTTTGGCTCAACCAAATAAGAGCAGTGGAAACTACAAAGCTAGAGTGTGGTCGGGGCAGAGGGAATTCCTGGTGTAGCGGTGAAATGCGTAGATATCAGGAAGAACACCAGTGGCGAAGGCGCTCTGCTAGGCCGAGACTGACACTGAGGGACGAAAGCTAGGGGAGCGAATG - This is the sequence of ASV_131100. 
+```
+
+
+# Compare counts and relative abundance to see if they line up well (maybe even a correlation).
+
+# Based on counts identify Pre-bloom, bloom (if possible), and post-bloom phase (already guided by expression clusters)
+
+# Short info on winter activities, relate to Svedén et al. 2015.
