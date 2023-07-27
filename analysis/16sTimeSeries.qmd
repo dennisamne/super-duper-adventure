@@ -16,7 +16,7 @@ format:
 
 # 16S data overview
 
-This project focuses on the ASV dynamics of the *Aphanizomenon* in the 0.2 µm-fraction at the LMO-station from 2011-03-25 to 2019-12-17. Counts represented per each date is calculated as mean of replicates when available, relative abundances are also based on the mean of replicates. A.Andersson project is low counts, this is for years 2011 and 13.
+This project focuses on the ASV dynamics of the *Aphanizomenon* in the 0.2 µm-fraction at the LMO-station from 2011-03-25 to 2019-12-17. Counts represented per each date is calculated as mean of replicates when available, relative abundances are also based on the mean of replicates.
 
 ```{r}
 #| label: libraries
@@ -50,7 +50,6 @@ barrnap <- fread("../data/ampliseq.barrnap.tsv.gz", sep = "\t")
 
 dada2 <- fread("../data/ampliseq.DADA2_stats.tsv.gz") # Some of these samples not passable at all. Go through properly and see if needed in analysis... Especially A.andersson project has issues.
 
-
 SILVA <- fread("../data/ampliseq.SILVA.ASV_tax.tsv.gz") # Different annotations with SILVA and the ASV_tax_species
 
 #Sample_ID - select the correct projects. I.e some have been replaced, J.Pinhassi_14_02 -> J.Pinhassi_20_04.
@@ -72,7 +71,7 @@ asv_tables <- asv_tables %>%
  # mutate(ASV_name = paste0("ASV",row_number())) 
 ```
 
-Out of 1159 SILVA aphanizomenon sequences, all are annotated as dolichospermum in the SBDI annotation... For sure they are the same then in this case, but how to proceed? There are a total of 1401 Dolichospermum in the SBDI annotation, treat these as the traditional dolichospermum??
+Out of 1159 SILVA aphanizomenon sequences, all are annotated as dolichospermum in the SBDI annotation... For sure they are the same then. There are a total of 1401 Dolichospermum in the SBDI annotation, while no annotation of the genus Aphanizomenon is present in the SBDI. Thus the sequencees in Dolichospermum will be focused on to identify Aphanizomenon. Only one ASV belongs to the genus Anabaena, but this ASV has no counts, thus is not present in the LMO-data.
 
 ```{r}
 aphas <- SILVA %>%
@@ -83,13 +82,12 @@ aphas <- SILVA %>%
   #filter(ASV_ID %in% aphas) 
 ```
 
-Investigating if samples failed QC or have unusually low sequence numbers @fig-dada2_overview. 
+Investigating if samples failed QC or have unusually low sequence numbers @fig-dada2_overview. Noticeable is A.Andersson project with low counts, this covers years 2011 and 13.
 
 ```{r}
 #| label: fig-dada2_overview
 #| fig-cap: "Counts in the various steps, hard to see clear patterns"
 #| warning: false
-
 
 tmp <- dada2 %>%
   filter(sample %in% unique(sample_ID$sample))
@@ -106,10 +104,12 @@ dada2 %>%
 
 ```{r}
 #| label: fig-countSeqProject
-#| fig-cap: "Clear that the ANderson project has failed, this is years 2011,2013. Dashed line is 10000 counts, for reference."
+#| fig-cap: "Clear that the Adderson project has very low counts, this is years 2011,2013. Dashed line is 10000 counts, for reference."
 #| warning: false
 #| fig-width: 25
+
 #clean this up
+
 dada2 %>%
   filter(sample %in% unique(sample_ID$sample)) %>%
   mutate(sample = as_factor(sample) %>% fct_reorder(nonchim, .desc = TRUE)) %>%
@@ -127,20 +127,17 @@ dada2 %>%
         strip.text = element_text(size = 7, face = "plain", colour = "black")
         ) +
   geom_hline(yintercept=10000, linetype="dashed", colour = "green", size = 0.5) 
-  
 ```
 
 ```{r}
-#| label: tbl-dada2
+#| label: fig-dada2
 #| fig-cap: "DADA2-table"
 #| warning: false
 #| eval: false
 
 kable(dada2) %>%
   kable_styling(bootstrap_options = c("striped", "hover"))
-
 ```
-
 
 ```{r}
 #| label: something
@@ -153,7 +150,7 @@ asv_tables %>%
   ungroup()
 ```
 
-Proceeding with the subsetted Dolichos in the SBDI for now to look at dynamics.
+Proceeding with the Dolichos in the SBDI to look at dynamics.
 
 ```{r}
 #| label: rarecurve
@@ -212,6 +209,17 @@ relab_table %>%
 ```
 
 ```{r}
+#| label: AnabaenaCheck
+#| warning: false
+#| eval: false
+# Quick look at the anabaena ASV
+
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(ASV_name == "ASV_38422") # The Anabaena is not present in the output count table, perhaps it's found in other sequencing projects.
+```
+
+```{r}
 #| label: Nostoc_species2
 #| warning: false
 #| eval: false
@@ -251,9 +259,10 @@ relab_table %>%
   facet_wrap(~ Year)
 ```
 
-The important ASV's responsible for the species level dynamics in @fig-Nostoc_species were next identified by plotting all ASV's within the Dolichospermum flosaquae species. Among the flosaquae ASV's, it is largely one ASV (ASV131100) which is responsible for the dynamics @fig-Aph-species. 
+The important ASV's responsible for the species level dynamics in @fig-Nostoc_species were next identified by plotting all ASV's within the Dolichospermum flosaquae species. Among the flosaquae ASV's, it is largely one ASV (ASV131100) which is responsible for the dynamics 
+@fig-Aph-species. 
 
-(Sidenote: So far still doubtful about 2011 and 2013 due to low read count inputs,but doesn't really interfere with dynamics so should be OK to keep them). For ASV identity, perhaps extract sequence and place in tree to try and resolve taxonomic identity. What did Dreher et al. 2021 say about 16S and ADA-4??)
+(Sidenote: So far still doubtful about 2011 and 2013 due to low read count inputs,but doesn't really interfere with dynamics so should be OK to keep them). For ASV identity, perhaps extract sequence and place in tree to try and resolve taxonomic identity. Dreher et al. 2021 says that 16s is fairly congruent, as well as pigment genes (CpcAB) in the ADA-4clade)
 
 ```{r}
 #| label: fig-Aph_species
@@ -475,7 +484,6 @@ relab_table %>%
 A quick blast of the sequence gives 100% identity fo Aphanizomenon flos-aquae in ncbi. Another way to verify this, I think SBDI taxonomy is based on 16S sequences from reference genomes only, if so a blast against this database and the identity of these genomes placed in the Dreher tree could answer this question well...
 
 Following figure 3 and table S2 in Dreher et al. (Our MAG does not have a 16S rRNA seq), known genomes in the ADA-4 clade (and their accessions) are: 
-NCBI accession numbers to known the sequenced genomes found are listed below: 
 
 Aphanizomenon flos-aquae DEX188 [CP051188](https://www.ncbi.nlm.nih.gov/nuccore/CP051188.1/)   
 
@@ -490,9 +498,16 @@ Aphanizomenon flos-aquae DEX188 - 1 hit with 100% query coverage and 100% identi
 Aphanizomenon flos-aquae CP01 - no hits found even though it is reported to have 2 16S sequences.    
 Aphanizomenon flos-aquae UKL13_PBmSP - 3 hits with 100% query coverage, and 100, 99.51 and 99.01% identity respectively.   
 
-That seems to check out for two of the genomes, question then remains, is it distinguishable from other 16S sequences? Unfortunately it is hard to take it further after this. This also suggest that the two 16S sequences in CP01 are very different from the other members ADA-4 members.
+That seems to check out for two of the genomes, question then remains, is it distinguishable from other 16S sequences? Unfortunately it is hard to take it further after this. This also suggest that the two 16S sequences in CP01 are very different from the other members ADA-4 members.   
 
-Sequences from Dolichospermum also end up in the ADA-4 clade, look at some of these to see coverage, should also have high similarity, then take some from for example ADA-3, which should be lower similarity then.
+Sequences from Dolichospermum also end up in the ADA-4 clade, look at some of these to see coverage, should also have high similarity, then take some from for example ADA-3, which should be lower similarity then.   
+
+From the ADA-3 clade an aphanizomenon sequence:   
+Aphanizomenon sp. UHCC 0183 - [VILC01000000](https://www.ncbi.nlm.nih.gov/nuccore/VILC00000000.1) - one hit with 100% coverage and 99.01% identity.   
+Dolichospermum flos-aquae UHCC 0037 - [VILF01000000](https://www.ncbi.nlm.nih.gov/nuccore/VILF00000000.1) -  one hit 100% coverage and 99.21% identity. 
+
+Very briefly, this looks like a lower percent than that of the ADA-4 clade, pointing to ADA-4 as the designated group. If necessary to make this even more robust, a tree can be made of the reference sequences.
+
 
 ```{r}
 #| label: ASV_16s_seq
@@ -502,9 +517,6 @@ Sequences from Dolichospermum also end up in the ADA-4 clade, look at some of th
 #TGGGGAATTTTCCGCAATGGGCGAAAGCCTGACGGAGCAATACCGCGTGAGGGAGGAAGGCTCTTGGGTTGTAAACCTCTTTTCTCAGGGAAGAACAGAATGACGGTACCTGAGGAATAAGCATCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGATGCAAGCGTTATCCGGAATGATTGGGCGTAAAGGGTCCGCAGGTGGCATTGTAAGTCTGCTGTTAAAGAGTTTGGCTCAACCAAATAAGAGCAGTGGAAACTACAAAGCTAGAGTGTGGTCGGGGCAGAGGGAATTCCTGGTGTAGCGGTGAAATGCGTAGATATCAGGAAGAACACCAGTGGCGAAGGCGCTCTGCTAGGCCGAGACTGACACTGAGGGACGAAAGCTAGGGGAGCGAATG - This is the sequence of ASV_131100. 
 ```
 
-
 # Compare counts and relative abundance to see if they line up well (maybe even a correlation).
 
 # Based on counts identify Pre-bloom, bloom (if possible), and post-bloom phase (already guided by expression clusters)
-
-# Short info on winter activities, relate to Svedén et al. 2015.
