@@ -14,9 +14,9 @@ format:
      self-contained: true
 ---
 
-# 16S data overview
+# Project overview
 
-This project focuses on the ASV dynamics of the *Aphanizomenon* in the 0.2 µm-fraction at the LMO-station from 2011-03-25 to 2019-12-17. Counts represented per each date is calculated as mean of replicates when available, relative abundances are also based on the mean of replicates.
+This project focuses on phytoplankton counts and ASV dynamics of the *Aphanizomenon* and associated Nostocales in the 0.2 µm-fraction at the LMO-station from 2011-03-25 to 2019-12-17. Counts represented per each date is calculated as mean of replicates when available, relative abundances are also based on the mean of replicates.
 
 ```{r}
 #| label: libraries
@@ -25,6 +25,8 @@ library(data.table)
 library(tidyverse)
 library(vegan)
 library(kableExtra)
+library(DT)
+library(plotly)
 ```
 
 ```{r}
@@ -69,7 +71,152 @@ asv_tables <- asv_tables %>%
 #  distinct(ASV_ID) %>%
  # mutate(ASV_ID = as_factor(ASV_ID) %>% fct_reorder(row_number())) %>% 
  # mutate(ASV_name = paste0("ASV",row_number())) 
+
+#Reading in a key for cruisnumber to date
+LMODate <- read_tsv("../data/LMOCruiseToDate.tsv")
+
+# Reading in phytoplankton count figure and converting to understandable format and joining in dates
+phytoCount <- read_tsv("../data/phyto_counts_USE_20210614.tsv") %>% 
+  inner_join(LMODate, by = "LMO") %>%
+  filter(!is.na(Biomass_mgC_m3)) %>%# Removing NA's from dataset as they interfere with operations
+  mutate(Year = str_extract(Date, "[0-9][0-9][0-9][0-9]")) # Adding year as a separate column
+
 ```
+
+## Phytoplankton counts overview
+
+Nostocales Biomass is plotted here as "Nostocophyceae (Cyanophyceae)" since named so in the phytocounts-file, it becomes evident the shift occured in 2015 when inspecting @fig-NostocClassAbundance the class most affected is Litostomatea, irregular abundances of Nostocophycaeae are also noted throughout the years, regardless of different counting methods. So far size fractions have been ignored while making this figure.
+
+```{r}
+#| label: fig-NostocClassAbundance
+#| fig-cap: "Biomass values for the most abundant classes in the phytocount dataset at the LMO-station from year 2011-2020. Dashed line marks shift in counting method."
+#| warning: false
+
+top11 <- phytoCount %>%
+  group_by(Class) %>%
+  summarise(Biomass_mgC_m3 = mean(Biomass_mgC_m3)) %>%
+  ungroup() %>%
+  arrange(desc(Biomass_mgC_m3)) %>%
+  slice(1:11) %>%
+  pull(Class)
+
+
+phytoCount %>%
+  mutate(Class = ifelse(Class %in% top11, paste0(Class),paste0("Other"))) %>%
+  group_by(Date, Class) %>%
+  summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>%
+  ungroup() %>%
+  ggplot(mapping = aes(x = Date, y = Biomass_mgC_m3, group = Class, colour = Class)) +
+  geom_line() +
+  theme_minimal() +
+  scale_color_manual('Class', values = GEOM_COL_COLOURS) +
+  geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed")
+```
+
+Listing the different shapes and sizeclasses within the nostocophyceae (see table below for all different combinations). For Aphanizomenon specifically it appears to have the same sizerange, minus the ND, to investigate this Aohanizomenon will be plotted in isolation.
+
+```{r}
+#| label: shapeSize_table
+#| warning: false
+
+DT::datatable(
+  phytoCount %>% 
+  filter(Class == "Nostocophyceae (Cyanophyceae)") %>% 
+  distinct(Geometric_shape, SizeClassNo, Size_Range, Unit)
+)
+
+
+DT::datatable(
+  phytoCount %>% 
+  filter(Genus == "Aphanizomenon") %>% 
+  distinct(Geometric_shape, SizeClassNo, Size_Range, Unit)
+)
+```
+
+Inspecting this graph including all genuses within Nostophycaeae (@fig-NostocDyn), the Aphanizomenon count trends look similar regardless of the shift in 2015, with the exception that the yearly abundances seem to be higher for a longer period pre-2015. Regardless, it is evident that Aphanizomenon is the major contributor to biomass within the Nostocophyceae together with Nodularia and Anabaena, Planktolyngbya is also present in 2016, and Aphanothece in 2018. Note that there is a peak on the 15th of February which correspond to an expression peak seen in the gene expression data. Here is becomes clear that Aphanizomenon is actually more abundant throughout the year, as opposed to Nodularia which have a shorter bloom period.
+
+```{r}
+#| label: fig-NostocDyn
+#| fig-cap: The biomass of the genus *Aphanizomenon sp.* summarised per date for the years 2011-2020. Dotted line denote shift in counting facility.
+#| warning: false
+
+plot <- phytoCount %>%
+  filter(Class == "Nostocophyceae (Cyanophyceae)") %>%
+  #filter(Genus %in% c("Aphanizomenon","Nodularia","Dolichospermum","Pseudo-anabaena","Anabaena")) %>%
+  group_by(Date, Genus) %>%
+  summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>%
+  ungroup() %>%
+  ggplot(mapping = aes(x = Date, y = Biomass_mgC_m3, group = Genus, colour = Genus)) +
+  geom_line() +
+  theme_minimal() +
+  #scale_color_manual('Genus', values = GEOM_COL_COLOURS)  +
+  geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed") 
+
+ggplotly(plot)
+```
+
+Ordering the most abundant genuses we see that Aphanizomenon and Nodularia are in the top ten, while Dolichospermum end up at position 29. (I have not cleaned out cilliates and small flagellates).
+
+```{r}
+#| label: phytoGenusOverview
+#| warning: false
+
+DT::datatable(
+  phytoCount %>%
+  group_by(Genus) %>%
+  summarise(Biomass_mgC_m3 = mean(Biomass_mgC_m3)) %>%
+  ungroup() %>%
+  arrange(desc(Biomass_mgC_m3))
+  )
+```
+
+Plotting the most abundant genuses in the dataset, still Aphanizomenon and Nodularia show up, while Peridiniella (Dinophyceae) is the most abundant @fig-phytotidying.
+
+```{r}
+#| label: fig-phytoTidying
+#| fig-label: Visualising the most abundant genuses in the entire dataset.
+#| warning: false
+
+#Selecting the 11 most abundant genuses, and adding the 'Other' category - cilliates are a genus...
+top11 <- phytoCount %>%
+  group_by(Genus) %>%
+  summarise(Biomass_mgC_m3 = mean(Biomass_mgC_m3)) %>%
+  ungroup() %>%
+  arrange(desc(Biomass_mgC_m3)) %>%
+  slice(1:11) %>%
+  pull(Genus)
+
+phytoCount %>%
+  mutate(Genus = ifelse(Genus %in% top11, paste0(Genus),paste0("Other"))) %>%
+  group_by(Date, Genus) %>%
+  summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>%
+  ungroup() %>%
+  ggplot(mapping = aes(x = Date, y = Biomass_mgC_m3, group = Genus, colour = Genus)) +
+  geom_line() +
+  theme_minimal() +
+  scale_color_manual('Genus', values = GEOM_COL_COLOURS) +
+  geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed")
+```
+
+The Phytoplankton counts are mainly separated into two periods: Pre-2015 where the counting was done in-house, and 2015 and afterwards where the samples were sent to Poland for enumeration.
+
+In the Nostocales there are `r phytoCount %>% filter(Class == "Nostocophyceae (Cyanophyceae)") %>% distinct(Genus) %>% nrow()` different genuses. These are listed in the table below. Among them the major players in the BS are found, including *Dolichospermum flosaquae* along with several other *Dolichospermum sp.*, *Anabaena sp.* and *Aphanizomenon flosaquae.* together with another *Aphanizomenon sp.*. 
+
+```{r}
+#| label: tbl-nostocOverview
+#| tbl-cap: "Listing of all Genus and species in the LMO-phytocount dataset."
+#| warning: false
+
+datatable(phytoCount %>% filter(Class == "Nostocophyceae (Cyanophyceae)") %>% distinct(Genus, Species))
+```
+
+
+```{r}
+
+```
+
+
+## 16S data overview
 
 Out of 1159 SILVA aphanizomenon sequences, all are annotated as dolichospermum in the SBDI annotation... For sure they are the same then. There are a total of 1401 Dolichospermum in the SBDI annotation, while no annotation of the genus Aphanizomenon is present in the SBDI. Thus the sequencees in Dolichospermum will be focused on to identify Aphanizomenon. Only one ASV belongs to the genus Anabaena, but this ASV has no counts, thus is not present in the LMO-data.
 
@@ -259,8 +406,7 @@ relab_table %>%
   facet_wrap(~ Year)
 ```
 
-The important ASV's responsible for the species level dynamics in @fig-Nostoc_species were next identified by plotting all ASV's within the Dolichospermum flosaquae species. Among the flosaquae ASV's, it is largely one ASV (ASV131100) which is responsible for the dynamics 
-@fig-Aph-species. 
+The important ASV's responsible for the species level dynamics in @fig-Nostoc_species were next identified by plotting all ASV's within the Dolichospermum flosaquae species. Among the flosaquae ASV's, it is largely one ASV (ASV131100) which is responsible for the dynamics @fig-Aph_species.
 
 (Sidenote: So far still doubtful about 2011 and 2013 due to low read count inputs,but doesn't really interfere with dynamics so should be OK to keep them). For ASV identity, perhaps extract sequence and place in tree to try and resolve taxonomic identity. Dreher et al. 2021 says that 16s is fairly congruent, as well as pigment genes (CpcAB) in the ADA-4clade)
 
@@ -307,10 +453,12 @@ relab_table %>%
   facet_wrap(~ Year, scales = "free_x") +
   xlab("Date") +
   ylab("Relative Abundance") +
-  scale_x_date(date_breaks = "2 months", date_labels = "%m")
+  scale_x_date(date_breaks = "2 months", date_labels = "%b")
 ```
 
-The dominant ASV_131100 reaches peak-abundance in summer, from the period of Mid-June to end of July, with abundances ranging from ~9% up to > 40%. In December 2012 the ASV reaches peak abundance of > 30% in December. Keep in mind that rRNA copies of the filamentous cyanos are several (Mentioned in abstract of Dreher et al. 2021).
+The dominant ASV_131100 reaches peak-abundance in summer, from the period of Mid-June to end of July, with abundances ranging from \~9% up to \> 40%. In December 2012 the ASV reaches peak abundance of \> 30% in December. For the smoothing function, keepin mind that the uprise in December is caused by 2012.\
+Keep in mind that rRNA copies of the filamentous cyanos are several (Mentioned in abstract of Dreher et al. 2021).
+
 ```{r}
 #| layout-ncol: 2
 #| label: fig-Dominant_ASV_dynamics
@@ -481,33 +629,31 @@ relab_table %>%
 
 # Placement of 16S sequence in tree with known ADA-4 clade 16S sequences
 
-A quick blast of the sequence gives 100% identity fo Aphanizomenon flos-aquae in ncbi. Another way to verify this, I think SBDI taxonomy is based on 16S sequences from reference genomes only, if so a blast against this database and the identity of these genomes placed in the Dreher tree could answer this question well...
+Blasting the 16S sequence against the Aphanizomenon MAG yields no hits, (at a 90% similarity treshold). A quick blast of the sequence gives 100% identity fo Aphanizomenon flos-aquae in ncbi. Another way to verify this, I think SBDI taxonomy is based on 16S sequences from reference genomes only, if so a blast against this database and the identity of these genomes placed in the Dreher tree could answer this question well...
 
-Following figure 3 and table S2 in Dreher et al. (Our MAG does not have a 16S rRNA seq), known genomes in the ADA-4 clade (and their accessions) are: 
+Following figure 3 and table S2 in [Dreher et al. 2021](https://pubmed.ncbi.nlm.nih.gov/33980445/) (Our MAG does not have a 16S rRNA seq), known genomes in the ADA-4 clade (and their accessions) are:
 
-Aphanizomenon flos-aquae DEX188 [CP051188](https://www.ncbi.nlm.nih.gov/nuccore/CP051188.1/)   
+Aphanizomenon flos-aquae DEX188 [CP051188](https://www.ncbi.nlm.nih.gov/nuccore/CP051188.1/)
 
-Aphanizomenon flos-aquae CP01 [JABGCF000000000](https://www.ncbi.nlm.nih.gov/nuccore/JABGCF000000000.1/)   
+Aphanizomenon flos-aquae CP01 [JABGCF000000000](https://www.ncbi.nlm.nih.gov/nuccore/JABGCF000000000.1/)
 
-Aphanizomenon flos-aquae UKL13_PBmSP [LTEC02000000](https://www.ncbi.nlm.nih.gov/nuccore/LTEC00000000.2/)   
+Aphanizomenon flos-aquae UKL13_PBmSP [LTEC02000000](https://www.ncbi.nlm.nih.gov/nuccore/LTEC00000000.2/)\
 The other reference genomes are not in table S2.
 
-Performing the blastn using query sequence of ASV_131100:    TGGGGAATTTTCCGCAATGGGCGAAAGCCTGACGGAGCAATACCGCGTGAGGGAGGAAGGCTCTTGGGTTGTAAACCTCTTTTCTCAGGGAAGAACAGAATGACGGTACCTGAGGAATAAGCATCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGATGCAAGCGTTATCCGGAATGATTGGGCGTAAAGGGTCCGCAGGTGGCATTGTAAGTCTGCTGTTAAAGAGTTTGGCTCAACCAAATAAGAGCAGTGGAAACTACAAAGCTAGAGTGTGGTCGGGGCAGAGGGAATTCCTGGTGTAGCGGTGAAATGCGTAGATATCAGGAAGAACACCAGTGGCGAAGGCGCTCTGCTAGGCCGAGACTGACACTGAGGGACGAAAGCTAGGGGAGCGAATG    
+Performing the blastn using query sequence of ASV_131100: TGGGGAATTTTCCGCAATGGGCGAAAGCCTGACGGAGCAATACCGCGTGAGGGAGGAAGGCTCTTGGGTTGTAAACCTCTTTTCTCAGGGAAGAACAGAATGACGGTACCTGAGGAATAAGCATCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGATGCAAGCGTTATCCGGAATGATTGGGCGTAAAGGGTCCGCAGGTGGCATTGTAAGTCTGCTGTTAAAGAGTTTGGCTCAACCAAATAAGAGCAGTGGAAACTACAAAGCTAGAGTGTGGTCGGGGCAGAGGGAATTCCTGGTGTAGCGGTGAAATGCGTAGATATCAGGAAGAACACCAGTGGCGAAGGCGCTCTGCTAGGCCGAGACTGACACTGAGGGACGAAAGCTAGGGGAGCGAATG
 
-Aphanizomenon flos-aquae DEX188 - 1 hit with 100% query coverage and 100% identity
-Aphanizomenon flos-aquae CP01 - no hits found even though it is reported to have 2 16S sequences.    
-Aphanizomenon flos-aquae UKL13_PBmSP - 3 hits with 100% query coverage, and 100, 99.51 and 99.01% identity respectively.   
+Aphanizomenon flos-aquae DEX188 - 1 hit with 100% query coverage and 100% identity Aphanizomenon flos-aquae CP01 - no hits found even though it is reported to have 2 16S sequences.\
+Aphanizomenon flos-aquae UKL13_PBmSP - 3 hits with 100% query coverage, and 100, 99.51 and 99.01% identity respectively.
 
-That seems to check out for two of the genomes, question then remains, is it distinguishable from other 16S sequences? Unfortunately it is hard to take it further after this. This also suggest that the two 16S sequences in CP01 are very different from the other members ADA-4 members.   
+That seems to check out for two of the genomes, question then remains, is it distinguishable from other 16S sequences? Unfortunately it is hard to take it further after this. This also suggest that the two 16S sequences in CP01 are very different from the other members ADA-4 members.
 
-Sequences from Dolichospermum also end up in the ADA-4 clade, look at some of these to see coverage, should also have high similarity, then take some from for example ADA-3, which should be lower similarity then.   
+Sequences from Dolichospermum also end up in the ADA-4 clade, look at some of these to see coverage, should also have high similarity, then take some from for example ADA-3, which should be lower similarity then.
 
-From the ADA-3 clade an aphanizomenon sequence:   
-Aphanizomenon sp. UHCC 0183 - [VILC01000000](https://www.ncbi.nlm.nih.gov/nuccore/VILC00000000.1) - one hit with 100% coverage and 99.01% identity.   
-Dolichospermum flos-aquae UHCC 0037 - [VILF01000000](https://www.ncbi.nlm.nih.gov/nuccore/VILF00000000.1) -  one hit 100% coverage and 99.21% identity. 
+From the ADA-3 clade an aphanizomenon sequence:\
+Aphanizomenon sp. UHCC 0183 - [VILC01000000](https://www.ncbi.nlm.nih.gov/nuccore/VILC00000000.1) - one hit with 100% coverage and 99.01% identity.\
+Dolichospermum flos-aquae UHCC 0037 - [VILF01000000](https://www.ncbi.nlm.nih.gov/nuccore/VILF00000000.1) - one hit 100% coverage and 99.21% identity.
 
 Very briefly, this looks like a lower percent than that of the ADA-4 clade, pointing to ADA-4 as the designated group. If necessary to make this even more robust, a tree can be made of the reference sequences.
-
 
 ```{r}
 #| label: ASV_16s_seq
