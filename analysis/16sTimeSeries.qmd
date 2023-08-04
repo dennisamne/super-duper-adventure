@@ -37,6 +37,15 @@ GEOM_COL_COLOURS = c(
 
 YEAR_COLOURS = c("2011" = "#A6CEE3","2012" = "#1F78B4", "2013" = "#B2DF8A","2014" = "#33A02C", "2015" = "#FB9A99", "2016" = "#E31A1C", "2017" = "#FDBF6F", "2018" = "#FF7F00", "2019" = "#CAB2D6")
 
+GENUS_COLOURS1 = c("Aphanizomenon" = "#33A02C",
+                   "Dolichospermum" = "#A6CEE3", 
+                   "Nodularia" = "#1F78B4",
+                   "Anabaena" = "#CAB2D6",
+                   "Pseudo-anabaena" = "#FF7F00")
+
+GENUS_COLOURS2 = c("Dolichospermum" = "#A6CEE3", 
+                   "Nodularia" = "#1F78B4",
+                   "Pseudanabaena" = "#FF7F00")
 ```
 
 ```{r}
@@ -113,7 +122,7 @@ phytoCount %>%
   geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed")
 ```
 
-Listing the different shapes and sizeclasses within the nostocophyceae (see table below for all different combinations). For Aphanizomenon specifically it appears to have the same sizerange, minus the ND, to investigate this Aohanizomenon will be plotted in isolation.
+Listing the different shapes and sizeclasses within the nostocophyceae (see table below for all different combinations). For Aphanizomenon specifically it appears to have the same sizerange, minus the ND, to investigate this Aphanizomenon will be plotted in isolation.
 
 ```{r}
 #| label: shapeSize_table
@@ -133,11 +142,11 @@ DT::datatable(
 )
 ```
 
-Inspecting this graph including all genuses within Nostophycaeae (@fig-NostocDyn), the Aphanizomenon count trends look similar regardless of the shift in 2015, with the exception that the yearly abundances seem to be higher for a longer period pre-2015. Regardless, it is evident that Aphanizomenon is the major contributor to biomass within the Nostocophyceae together with Nodularia and Anabaena, Planktolyngbya is also present in 2016, and Aphanothece in 2018. Note that there is a peak on the 15th of February which correspond to an expression peak seen in the gene expression data. Here is becomes clear that Aphanizomenon is actually more abundant throughout the year, as opposed to Nodularia which have a shorter bloom period.
+Inspecting this graph including all genuses within Nostophycaeae (@fig-NostocDyn), the Aphanizomenon count trends look similar regardless of the shift in 2015, with the exception that the yearly abundances seem to be higher for a longer period pre-2015. Regardless, it is evident that Aphanizomenon is the major contributor to biomass within the Nostocophyceae together with Nodularia and Anabaena, Planktolyngbya is also present in 2016, and Aphanothece in 2018. Note that there is a peak on the 15th of February 2017 which correspond to an expression peak seen in the gene expression data. Here is becomes clear that Aphanizomenon is actually more abundant throughout the year, as opposed to Nodularia which have a shorter bloom period.
 
 ```{r}
 #| label: fig-NostocDyn
-#| fig-cap: The biomass of the genus *Aphanizomenon sp.* summarised per date for the years 2011-2020. Dotted line denote shift in counting facility.
+#| fig-cap: The biomass of the genuses within Nostocophyceae summarised per date for the years 2011-2020.
 #| warning: false
 
 plot <- phytoCount %>%
@@ -155,7 +164,7 @@ plot <- phytoCount %>%
 ggplotly(plot)
 ```
 
-Ordering the most abundant genuses we see that Aphanizomenon and Nodularia are in the top ten, while Dolichospermum end up at position 29. (I have not cleaned out cilliates and small flagellates).
+Ordering the most abundant genuses of the full dataset we see that Aphanizomenon and Nodularia are in the top ten, while Dolichospermum end up at position 29. (I have not cleaned out cilliates and small flagellates).
 
 ```{r}
 #| label: phytoGenusOverview
@@ -170,11 +179,11 @@ DT::datatable(
   )
 ```
 
-Plotting the most abundant genuses in the dataset, still Aphanizomenon and Nodularia show up, while Peridiniella (Dinophyceae) is the most abundant @fig-phytotidying.
+Plotting the most abundant genuses in the dataset, still Aphanizomenon and Nodularia show up, while Peridiniella (Dinophyceae) is the most abundant @fig-phytoTidying. Indicating that Nostoc is among the largest contributors to phytoplankton biomass at the LMO if we focus on post period of 2015. Still a large contributor of 2011-2014 but percentage wise they contribute less due to cilliates.
 
 ```{r}
 #| label: fig-phytoTidying
-#| fig-label: Visualising the most abundant genuses in the entire dataset.
+#| fig-label: Visualising the most abundant genuses in the entire dataset. Note that cilliates pop up, which is not a genus, but how the dataset looks...
 #| warning: false
 
 #Selecting the 11 most abundant genuses, and adding the 'Other' category - cilliates are a genus...
@@ -210,9 +219,26 @@ In the Nostocales there are `r phytoCount %>% filter(Class == "Nostocophyceae (C
 datatable(phytoCount %>% filter(Class == "Nostocophyceae (Cyanophyceae)") %>% distinct(Genus, Species))
 ```
 
+Now that we have seen that the most important players of Nostoc in the phytocount data are Aphanizomenon and Nodularia we plot these together (@fig-NostocFacet) and highlight the elevated abundance period of Aphanizomenon as compared to Nodularia. One could consider to include here only Aphanizomenon, Nodularia, Anabaena and Planktolyngbya based on abundances.
 
 ```{r}
+#| label: fig-NostocFacet
+#| fig-cap: "Visualising a select of the Nostoc genuses. Note the different axis values."
+#| warning: false
 
+phytoCount %>%
+  filter(Genus %in% c("Aphanizomenon","Nodularia","Dolichospermum","Pseudo-anabaena","Anabaena")) %>%
+  group_by(Date, Genus) %>%
+  summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>%
+  ungroup() %>%
+  inner_join(phytoCount %>% distinct(Date, Year), by = "Date") %>%
+  ggplot(mapping = aes(x = Date, y = Biomass_mgC_m3, group = Genus, colour = Genus)) +
+  geom_line() +
+  theme_minimal() +
+  #scale_color_manual('Genus', values = GEOM_COL_COLOURS)  +
+  #geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed") +
+  facet_wrap(~ Year, scales = "free") +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b")
 ```
 
 
@@ -438,7 +464,7 @@ relab_table %>%
   summarise(relab = sum(relab)) %>%
   ungroup() %>%
   mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
-  ggplot(mapping = aes(x = date, y = relab, group = topASV, colour = topASV)) +
+           ggplot(mapping = aes(x = date, y = relab, group = topASV, colour = topASV)) +
   geom_line() +
   geom_point() +
   scale_color_manual('Year', values = GEOM_COL_COLOURS) +
@@ -664,5 +690,143 @@ Very briefly, this looks like a lower percent than that of the ADA-4 clade, poin
 ```
 
 # Compare counts and relative abundance to see if they line up well (maybe even a correlation).
+
+Comparing the phytoplankton counts with 16S abundances it appear that Aphanizomenon counts are somewhat followed by the Dolichospermum 16S-abundances (@fig-16SAndPhytoCounts) (16S can't separate Aphanizomenon and SBDI names all Aphanizomenon in NCBI to Dolicho.) Suggesting that the 16S is capturing what we are seeing in the counts as well. Nodularia on the other hand is poorly represented in the 16S abundance. 
+```{r}
+#| label: fig-16SAndPhytoCounts
+#| fig-cap: "Phytplankton absolute- and 16S relative- abundances of selected Nostoc genuses. Note that the year 202 0 has been left out of the count data for readability"
+#| fig-subcap: 
+#|   - "Phytocounts with fixed y-axis"
+#|   - "Phytocounts with free y-axis"
+#|   - "16S relative abundance"
+#| warning: false
+#| layout-ncol: 1
+
+#Plotting abundance of Phytocounts, fixed y-axis
+phytoCount %>%
+  filter(Year != "2020") %>%
+  filter(Genus %in% c("Aphanizomenon","Nodularia","Dolichospermum","Pseudo-anabaena","Anabaena")) %>%
+  group_by(Date, Genus) %>%
+  summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>%
+  ungroup() %>%
+  inner_join(phytoCount %>% distinct(Date, Year), by = "Date") %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(Date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(Date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(Date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(Date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(Date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(Date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(Date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(Date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(Date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = Biomass_mgC_m3, group = Genus, colour = Genus)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  scale_color_manual('Genus', values = GENUS_COLOURS1)  +
+  #geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed") +
+  facet_wrap(~ Year) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("month")
+
+#Plotting abundance of Phytocounts without fixed y-axis
+phytoCount %>%
+  filter(Year != "2020") %>%
+  filter(Genus %in% c("Aphanizomenon","Nodularia","Dolichospermum","Pseudo-anabaena","Anabaena")) %>%
+  group_by(Date, Genus) %>%
+  summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>%
+  ungroup() %>%
+  inner_join(phytoCount %>% distinct(Date, Year), by = "Date") %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(Date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(Date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(Date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(Date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(Date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(Date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(Date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(Date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(Date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = Biomass_mgC_m3, group = Genus, colour = Genus)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  scale_color_manual('Genus', values = GENUS_COLOURS1)  +
+  #geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed") +
+  facet_wrap(~ Year, scales = "free_y") +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("month")
+
+
+
+#Plotting 16S relative abundances
+#Subset to: 
+# Dolichospermum flosaquae, Dolichospermum sp000312705
+
+#Aphanizomenon is absent in the 16S so no need. Then subset Nodularia
+relab_table <- asv_tables %>%
+  inner_join(sample_ID, by = "sample") %>%
+  group_by(date,ASV_ID) %>%
+  summarise(count = mean(count)) %>%
+  ungroup() %>%
+  group_by(date) %>%
+  mutate(relab = count/sum(count)) %>%
+  ungroup() 
+
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(Genus %in% c("Dolichospermum", "Nodularia","Anabaena","Pseudanabaena")) %>%
+  group_by(Genus, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab, group = Genus, colour = Genus)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ Year) +
+  scale_color_manual('Genus', values = GENUS_COLOURS2) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("month")
+```
+
 
 # Based on counts identify Pre-bloom, bloom (if possible), and post-bloom phase (already guided by expression clusters)
