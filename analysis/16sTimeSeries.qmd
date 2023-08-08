@@ -45,12 +45,14 @@ GENUS_COLOURS1 = c("Aphanizomenon" = "#33A02C",
 
 GENUS_COLOURS2 = c("Dolichospermum" = "#A6CEE3", 
                    "Nodularia" = "#1F78B4",
-                   "Pseudanabaena" = "#FF7F00")
+                   "Pseudanabaena" = "#FF7F00",
+                   "Anabaena" = "#CAB2D6")
 ```
 
 ```{r}
 #| label: file_loading
 #| warning: false
+#| cache: true
 
 asv_tables <- fread("../data/ampliseq.ASV_tables.tsv.gz", sep ="\t") # ASV counts per sample, also contains projects other than LMO, i.e "KB", which is for now removed due to the inner_join with sample_ID which LMO is the only project selected.
 
@@ -209,7 +211,7 @@ phytoCount %>%
 
 The Phytoplankton counts are mainly separated into two periods: Pre-2015 where the counting was done in-house, and 2015 and afterwards where the samples were sent to Poland for enumeration.
 
-In the Nostocales there are `r phytoCount %>% filter(Class == "Nostocophyceae (Cyanophyceae)") %>% distinct(Genus) %>% nrow()` different genuses. These are listed in the table below. Among them the major players in the BS are found, including *Dolichospermum flosaquae* along with several other *Dolichospermum sp.*, *Anabaena sp.* and *Aphanizomenon flosaquae.* together with another *Aphanizomenon sp.*. 
+In the Nostocales there are `r phytoCount %>% filter(Class == "Nostocophyceae (Cyanophyceae)") %>% distinct(Genus) %>% nrow()` different genuses. These are listed in the table below. Among them the major players in the BS are found, including *Dolichospermum flosaquae* along with several other *Dolichospermum sp.*, *Anabaena sp.* and *Aphanizomenon flosaquae.* together with another *Aphanizomenon sp.*.
 
 ```{r}
 #| label: tbl-nostocOverview
@@ -240,7 +242,6 @@ phytoCount %>%
   facet_wrap(~ Year, scales = "free") +
   scale_x_date(date_breaks = "2 months", date_labels = "%b")
 ```
-
 
 ## 16S data overview
 
@@ -321,6 +322,58 @@ asv_tables %>%
   group_by(date) %>%
   summarise(count = mean(count)) %>%
   ungroup()
+```
+
+Plotting all Nostocales expression at the LMO. In SBDI they are considered a family "Nostocaceae". It becomes evident that only Nodularia and Dolichospermum are relatively abundant (@fig-Nostocaceae). And that Dolichospermum is the main contributor to Nostocaceae abundance.
+
+```{r}
+#| label: fig-Nostocaceae
+#| fig-cap: "Relative abundance of all genuses in the nostocaceae family."
+#| warning: false
+
+relab_table <- asv_tables %>%
+  inner_join(sample_ID, by = "sample") %>%
+  group_by(date,ASV_ID) %>%
+  summarise(count = mean(count)) %>%
+  ungroup() %>%
+  group_by(date) %>%
+  mutate(relab = count/sum(count)) %>%
+  ungroup() 
+
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(Family == "Nostocaceae") %>%
+  group_by(Genus, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab, group = Genus, colour = Genus)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ Year) +
+ scale_color_manual('Genus', values = GEOM_COL_COLOURS) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("month")
 ```
 
 Proceeding with the Dolichos in the SBDI to look at dynamics.
@@ -689,9 +742,13 @@ Very briefly, this looks like a lower percent than that of the ADA-4 clade, poin
 #TGGGGAATTTTCCGCAATGGGCGAAAGCCTGACGGAGCAATACCGCGTGAGGGAGGAAGGCTCTTGGGTTGTAAACCTCTTTTCTCAGGGAAGAACAGAATGACGGTACCTGAGGAATAAGCATCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGATGCAAGCGTTATCCGGAATGATTGGGCGTAAAGGGTCCGCAGGTGGCATTGTAAGTCTGCTGTTAAAGAGTTTGGCTCAACCAAATAAGAGCAGTGGAAACTACAAAGCTAGAGTGTGGTCGGGGCAGAGGGAATTCCTGGTGTAGCGGTGAAATGCGTAGATATCAGGAAGAACACCAGTGGCGAAGGCGCTCTGCTAGGCCGAGACTGACACTGAGGGACGAAAGCTAGGGGAGCGAATG - This is the sequence of ASV_131100. 
 ```
 
+To identify our 16S sequences, also nodularia will be placed in a tree? Unless they match in the blast, check this!
+
+
 # Compare counts and relative abundance to see if they line up well (maybe even a correlation).
 
-Comparing the phytoplankton counts with 16S abundances it appear that Aphanizomenon counts are somewhat followed by the Dolichospermum 16S-abundances (@fig-16SAndPhytoCounts) (16S can't separate Aphanizomenon and SBDI names all Aphanizomenon in NCBI to Dolicho.) Suggesting that the 16S is capturing what we are seeing in the counts as well. Nodularia on the other hand is poorly represented in the 16S abundance. 
+Comparing the phytoplankton counts with 16S abundances it appear that Aphanizomenon counts are somewhat followed by the Dolichospermum 16S-abundances (@fig-16SAndPhytoCounts) (16S can't separate Aphanizomenon and SBDI names all Aphanizomenon in NCBI to Dolicho.) Suggesting that the 16S is capturing what we are seeing in the counts as well. Nodularia on the other hand is poorly represented in the 16S abundance.
+
 ```{r}
 #| label: fig-16SAndPhytoCounts
 #| fig-cap: "Phytplankton absolute- and 16S relative- abundances of selected Nostoc genuses. Note that the year 202 0 has been left out of the count data for readability"
@@ -779,8 +836,7 @@ phytoCount %>%
 
 
 #Plotting 16S relative abundances
-#Subset to: 
-# Dolichospermum flosaquae, Dolichospermum sp000312705
+
 
 #Aphanizomenon is absent in the 16S so no need. Then subset Nodularia
 relab_table <- asv_tables %>%
@@ -824,6 +880,198 @@ relab_table %>%
         axis.text = element_text(size = 8, colour = "black"),
         axis.title = element_text(size = 8, face = "bold", colour = "black")
         ) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("month")
+```
+
+It becomes clear to see that some patterns look different, this is partly due to the lumping of anabaena into Dolichospermum in the 16S data, so here they need to ber separated into the different ASV's and picked out individually to match the dynamics. As seen in @fig-Nostoc_species the species mainly responsible are an unnanottated Dolicho, flosaquae and Dolichospermum sp000312705, so these are then plotted into their specifc ASVs.
+
+For Dolichospermum sp000312705 there is mainly two ASV's responsible for relative abundance and mainly restricted to year 2015: ASV_165504 and ASV_27219 @fig-DolichoQuestioning.
+
+As we know already in the flosaquae it is mainly ASV_131100 that is responsible for dynamics.
+
+The unannotated ones on the other hand also shows some interesting dynamics, explaining mainly the year 2015: the asvs here are ASV_177401, ASV_101064.
+
+```{r}
+#| label: fig-DolichoQuestioning
+#| fig-cap: "Phytplankton absolute- and 16S relative- abundances of selected Nostoc genuses. Note that the year 202 0 has been left out of the count data for readability"
+#| fig-subcap: 
+#|   - "Phytocounts with fixed y-axis"
+#|   - "16S relative abundance"
+#| warning: false
+#| layout-ncol: 1
+
+#Subset to: 
+# Dolichospermum flosaquae, Dolichospermum sp000312705
+
+plot <- relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  group_by(ASV_ID, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  inner_join(asv_tax_species %>% distinct(ASV_ID, ASV_name, Species), by = "ASV_ID") %>%
+  filter(Species %in% c("Dolichospermum sp000312705")) %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab, group = ASV_name, colour = ASV_name)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ Year) +
+  #scale_color_manual('Genus', values = GENUS_COLOURS2) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("month")
+
+ggplotly(plot)
+
+
+#Plotting just hte dolicho
+
+ plot <- relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  group_by(ASV_ID, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  inner_join(asv_tax_species %>% distinct(ASV_ID, ASV_name, Species,Genus), by = "ASV_ID") %>%
+   filter(Genus == "Dolichospermum") %>%
+  filter(Species %in% c("")) %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab, group = ASV_name, colour = ASV_name)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ Year) +
+  #scale_color_manual('Genus', values = GENUS_COLOURS2) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("month")
+
+ggplotly(plot)
+
+```
+
+
+
+Plotting the relevant ASV's together @fig-relevant_ASVs. Looking at this together with the phytocounts, it would appear that 
+```{r}
+#| label: fig-relevant_ASVs
+#| fig-cap: "16S relative- abundances of the major ASV's in the Dolichospermum genus, followed by phytocounts of Aphanizomenon"
+#| warning: false
+#| fig-subcap: 
+#|   - "16S"
+#|   - "Aphanizomenon phytocounts"
+#| layout-ncol: 1
+# Relevant ASVs 
+ASVVec <- c("ASV_165504", "ASV_27219","ASV_131100","ASV_177401","ASV_101064")
+
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(ASV_name %in% ASVVec) %>%
+  group_by(ASV_ID, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  inner_join(asv_tax_species %>% distinct(ASV_ID, ASV_name, Species), by = "ASV_ID") %>%
+  mutate(ASV_name = paste0(ASV_name, Species)) %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab, group = ASV_name, colour = ASV_name)) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ Year) +
+  #scale_color_manual('Genus', values = GENUS_COLOURS2) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.position = "bottom"
+        ) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("month")
+
+#Phytocounts apha only
+phytoCount %>%
+  filter(Year != "2020") %>%
+  filter(Genus %in% c("Aphanizomenon")) %>%
+  group_by(Date, Genus) %>%
+  summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>%
+  ungroup() %>%
+  inner_join(phytoCount %>% distinct(Date, Year), by = "Date") %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(Date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(Date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(Date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(Date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(Date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(Date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(Date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(Date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(Date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = Biomass_mgC_m3, group = Genus, colour = Genus)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  scale_color_manual('Genus', values = GENUS_COLOURS1)  +
+  #geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed") +
+  facet_wrap(~ Year) +
   scale_x_date(date_breaks = "2 months", date_labels = "%b") +
   xlab("month")
 ```
