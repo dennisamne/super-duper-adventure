@@ -988,17 +988,58 @@ ggplotly(plot)
 
 
 
-Plotting the relevant ASV's together @fig-relevant_ASVs. Looking at this together with the phytocounts, it would appear that 
+Plotting the relevant ASV's together @fig-relevant_ASVs. Looking at this together with the phytocounts, it would appear that the patterns are better explained by the collective genus expression of several ASV's, as seen in @fig-16SAndPhytoCounts. While the large-scale patterns of peaks in summer are congruent, the peaks doesn't line up that well with the counts on a date-to-date basis. This could be due to the nature of the relative data, i.e if other ASV's are highly abundant, they may press down the relative abundance of for example Aphanizomenon, thus hampering the relationship between asbolute and relative abundance. For example the biomass in february 2017 is increasing, while the trend is decreasing in the 16s, in contrast there is also an increase in the gene expression during this date. Still both 16S and count data show a rather wide abundance window for Aphanizomenon.
 ```{r}
 #| label: fig-relevant_ASVs
 #| fig-cap: "16S relative- abundances of the major ASV's in the Dolichospermum genus, followed by phytocounts of Aphanizomenon"
 #| warning: false
 #| fig-subcap: 
-#|   - "16S"
 #|   - "Aphanizomenon phytocounts"
+#|   - "16S"
+#|   - "Apha counts free-yaxis"
 #| layout-ncol: 1
 # Relevant ASVs 
 ASVVec <- c("ASV_165504", "ASV_27219","ASV_131100","ASV_177401","ASV_101064")
+
+
+
+#Phytocounts apha only
+phytoCount %>%
+  filter(Year != "2020") %>%
+  filter(Genus %in% c("Aphanizomenon")) %>%
+  group_by(Date, Genus) %>%
+  summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>%
+  ungroup() %>%
+  inner_join(phytoCount %>% distinct(Date, Year), by = "Date") %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(Date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(Date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(Date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(Date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(Date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(Date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(Date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(Date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(Date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = Biomass_mgC_m3, group = Genus, colour = Genus)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.position = "bottom"
+        ) +
+  scale_color_manual('Genus', values = GENUS_COLOURS1[1])  +
+  #geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed") +
+  facet_wrap(~ Year) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("month")
 
 relab_table %>%
   inner_join(asv_tax_species, by = "ASV_ID") %>%
@@ -1035,10 +1076,10 @@ relab_table %>%
         axis.title = element_text(size = 8, face = "bold", colour = "black"),
         legend.position = "bottom"
         ) +
+  guides(colour=guide_legend(ncol=2)) +
   scale_x_date(date_breaks = "2 months", date_labels = "%b") +
   xlab("month")
 
-#Phytocounts apha only
 phytoCount %>%
   filter(Year != "2020") %>%
   filter(Genus %in% c("Aphanizomenon")) %>%
@@ -1067,11 +1108,12 @@ phytoCount %>%
         legend.title = element_text(size = 8, face = "bold", colour = "black"),
         legend.text = element_text(size = 8, colour = "black"),
         axis.text = element_text(size = 8, colour = "black"),
-        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        axis.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.position = "bottom"
         ) +
-  scale_color_manual('Genus', values = GENUS_COLOURS1)  +
+  scale_color_manual('Genus', values = GENUS_COLOURS1[1])  +
   #geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed") +
-  facet_wrap(~ Year) +
+  facet_wrap(~ Year, scales = "free_y") +
   scale_x_date(date_breaks = "2 months", date_labels = "%b") +
   xlab("month")
 ```
