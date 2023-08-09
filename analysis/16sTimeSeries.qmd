@@ -742,6 +742,19 @@ Very briefly, this looks like a lower percent than that of the ADA-4 clade, poin
 #TGGGGAATTTTCCGCAATGGGCGAAAGCCTGACGGAGCAATACCGCGTGAGGGAGGAAGGCTCTTGGGTTGTAAACCTCTTTTCTCAGGGAAGAACAGAATGACGGTACCTGAGGAATAAGCATCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGATGCAAGCGTTATCCGGAATGATTGGGCGTAAAGGGTCCGCAGGTGGCATTGTAAGTCTGCTGTTAAAGAGTTTGGCTCAACCAAATAAGAGCAGTGGAAACTACAAAGCTAGAGTGTGGTCGGGGCAGAGGGAATTCCTGGTGTAGCGGTGAAATGCGTAGATATCAGGAAGAACACCAGTGGCGAAGGCGCTCTGCTAGGCCGAGACTGACACTGAGGGACGAAAGCTAGGGGAGCGAATG - This is the sequence of ASV_131100. 
 ```
 
+```{r}
+#| label: ASV_16s_seq2
+#| warning: false
+#| include: false
+#| eval: false
+## Picking out all relevant sequences of ASV's to send to José
+#These are 
+"ASV_165504" - "TGGGGAATTTTCCGCAATGGGCGAAAGCCTGACGGAGCAATACCGCGTGAGGGAGGAAGGCTCTTGGGTTGTAAACCTCTTTTCTCAGGGAAGAAAAAAATGACGGTACCTGAGGAATAAGCATCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGATGCAAGCGTTATCCGGAATGATTGGGCGTAAAGGGTCCGCAGGTGGCATTGTTTGTCTGCTGTTAAAGAGTCTGGCTCAACCAGATCAAAGCAGTGGAAACTACAAAGCTAGAGTATGGTCGGGGCAGAGGGAATTCCTGGTGTAGCGGTGAAATGCGTAGATATCAGGAAGAACACCGGTGGCGAAGGCGCTCTGCTAGGCCAAAACTGACACTGAGGGACGAAAGCTAGGGGAGCGAATG"
+"ASV_27219" - "TGGGGAATTTTCCGCAATGGGCGAAAGCCTGACGGAGCAATACCGCGTGAGGGAGGAAGGCTCTTGGGTTGTAAACCTCTTTTCTCAGGGAAGAAAAAAATGACGGTACCTGAGGAATAAGCATCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGATGCAAGCGTTATCCGGAATGATTGGGCGTAAAGGGTCCGCAGGTGGCATTGTTTGTCTGCTGTTAAAGAGTCTGGCTCAACCAGATAAAAGCAGTGGAAACTACAAAGCTAGAGTATGGTCGGGGCAGAGGGAATTCCTGGTGTAGCGGTGAAATGCGTAGATATCAGGAAGAACACCGGTGGCGAAGGCGCTCTGCTAGGCCAAAACTGACACTGAGGGACGAAAGCTAGGGGAGCGAATG"
+"ASV_131100" - "TGGGGAATTTTCCGCAATGGGCGAAAGCCTGACGGAGCAATACCGCGTGAGGGAGGAAGGCTCTTGGGTTGTAAACCTCTTTTCTCAGGGAAGAACAGAATGACGGTACCTGAGGAATAAGCATCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGATGCAAGCGTTATCCGGAATGATTGGGCGTAAAGGGTCCGCAGGTGGCATTGTAAGTCTGCTGTTAAAGAGTTTGGCTCAACCAAATAAGAGCAGTGGAAACTACAAAGCTAGAGTGTGGTCGGGGCAGAGGGAATTCCTGGTGTAGCGGTGAAATGCGTAGATATCAGGAAGAACACCAGTGGCGAAGGCGCTCTGCTAGGCCGAGACTGACACTGAGGGACGAAAGCTAGGGGAGCGAATG"
+"ASV_177401" - "TGGGGAATTTTCCGCAATGGGCGAAAGCCTGACGGAGCAATACCGCGTGAGGGAGGAAGGCTCTTGGGTTGTAAACCTCTTTTCTCAGGGAAGAAAAAAATGACGGTACCTGAGGAATAAGCATCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGATGCAAGCGTTATCCGGAATGATTGGGCGTAAAGGGTCCGCAGGTGGCATTGTAAGTCTGCTGTTAAAGAGTTTGGCTCAACCAAATAAGAGCATTGGAAACTACAAAGCTAGAGTATGGTCGGGGCAGAGGGAATTCCTGGTGTAGCGGTGAAATGCGTAGATATCAGGAAGAACACCGGTGGCGAAGGCGCTCTGCTAGGCCAAAACTGACACTGAGGGACGAAAGCTAGGGGAGCGAATG"
+"ASV_101064" - "TGGGGAATTTTCCGCAATGGGCGAAAGCCTGACGGAGCAATACCGCGTGAGGGAGGAAGGCTCTTGGGTTGTAAACCTCTTTTCTCAGGGAAGAAAAAAATGACGGTACCTGAGGAATAAGCATCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGATGCAAGCGTTATCCGGAATGATTGGGCGTAAAGGGTCCGCAGGTGGCATTGTAAGTCTGCTGTTAAAGAGTTTGGCTCAACCAAATAAGAGCAGTGGAAACTACAAAGCTAGAGTATGGTCGGGGCAGAGGGAATTCCTGGTGTAGCGGTGAAATGCGTAGATATCAGGAAGAACACCGGTGGCGAAGGCGCTCTGCTAGGCCAAAACTGACACTGAGGGACGAAAGCTAGGGGAGCGAATG"
+```
 To identify our 16S sequences, also nodularia will be placed in a tree? Unless they match in the blast, check this!
 
 
@@ -988,7 +1001,8 @@ ggplotly(plot)
 
 
 
-Plotting the relevant ASV's together @fig-relevant_ASVs. Looking at this together with the phytocounts, it would appear that the patterns are better explained by the collective genus expression of several ASV's, as seen in @fig-16SAndPhytoCounts. While the large-scale patterns of peaks in summer are congruent, the peaks doesn't line up that well with the counts on a date-to-date basis. This could be due to the nature of the relative data, i.e if other ASV's are highly abundant, they may press down the relative abundance of for example Aphanizomenon, thus hampering the relationship between asbolute and relative abundance. For example the biomass in february 2017 is increasing, while the trend is decreasing in the 16s, in contrast there is also an increase in the gene expression during this date. Still both 16S and count data show a rather wide abundance window for Aphanizomenon.
+Plotting the relevant ASV's together @fig-relevant_ASVs. Looking at this together with the phytocounts, it would appear that the patterns are better explained by the collective genus expression of several ASV's, as seen in @fig-16SAndPhytoCounts. THIS should be confirmed with correlation.   
+While the large-scale patterns of peaks in summer are congruent, the peaks doesn't line up that well with the counts on a date-to-date basis. This could be due to the nature of the relative data, i.e if other ASV's are highly abundant, they may press down the relative abundance of for example Aphanizomenon, thus hampering the relationship between asbolute and relative abundance. For example the biomass in february 2017 is increasing, while the trend is decreasing in the 16s, in contrast there is also an increase in the gene expression during this date. Still both 16S and count data show a rather wide abundance window for Aphanizomenon.
 ```{r}
 #| label: fig-relevant_ASVs
 #| fig-cap: "16S relative- abundances of the major ASV's in the Dolichospermum genus, followed by phytocounts of Aphanizomenon"
@@ -1119,4 +1133,64 @@ phytoCount %>%
 ```
 
 
-# Based on counts identify Pre-bloom, bloom (if possible), and post-bloom phase (already guided by expression clusters)
+## Correlation of 16S abundances with phytocounts
+Not pretty, probably due to the bumpy values in 16S. Correlations are horrible @tbl-Correlation16SCounts.
+```{r}
+#| label: tbl-Correlation16SCounts
+#| tbl-cap: "Spearman correlation between 16S features (ASV's and Species summaries) and Aphanizomenon biomass"
+#| warning: false
+
+corr_df <- relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(ASV_name %in% ASVVec) %>%
+  group_by(ASV_ID, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  inner_join(asv_tax_species %>% distinct(ASV_ID, ASV_name)) %>%
+  select(-ASV_ID) %>%
+  pivot_wider(names_from = ASV_name, values_from = relab, values_fill = 0) %>%
+  rename(Date = "date") %>%
+  mutate(Date = as.Date(Date)) %>%
+  inner_join( #Joining in the species-level relative abundance ´
+    relab_table %>%
+      inner_join(asv_tax_species, by = "ASV_ID") %>%
+      filter(Genus == "Dolichospermum") %>%
+      filter(Species %in% c("Dolichospermum sp000312705","Dolichospermum flosaquae")) %>%
+      group_by(Species, date) %>%
+      summarise(relab = sum(relab)) %>%
+      ungroup() %>%
+      pivot_wider(names_from = Species, values_from = relab, values_fill = 0) %>%
+      rename(Date = "date") %>%
+      mutate(Date = as.Date(Date)),
+    by = "Date"
+  ) %>%
+  inner_join(phytoCount %>% # joining in the biomass
+               filter(Year != "2020") %>%
+               filter(Genus %in% c("Aphanizomenon")) %>% 
+               group_by(Date, Genus) %>% 
+               summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>% 
+               ungroup() %>%
+               select(-Genus),
+             by = "Date"
+  ) %>%
+  column_to_rownames("Date") 
+
+#Creating a dataframe to hold the output from the test
+
+matr = matrix(nrow = length(colnames(corr_df))-1, ncol = 3)
+
+for (i in 1:(length(colnames(corr_df))-1)) {
+  test <- cor.test(corr_df[,i], corr_df[,ncol(corr_df)], method = "spearman")
+  
+  matr[i,1] = round(test$p.value, digits = 2)
+  matr[i,2] = round(test$estimate, digits = 2)
+  matr[i,3] = colnames(corr_df[i])
+}
+
+hmm <- matr %>%
+  as.data.frame() %>%
+  rename(pVal = "V1", rho = "V2", feature = "V3")
+
+kableExtra::kable(hmm)
+```
+
