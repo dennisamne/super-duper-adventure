@@ -755,8 +755,17 @@ Very briefly, this looks like a lower percent than that of the ADA-4 clade, poin
 "ASV_177401" - "TGGGGAATTTTCCGCAATGGGCGAAAGCCTGACGGAGCAATACCGCGTGAGGGAGGAAGGCTCTTGGGTTGTAAACCTCTTTTCTCAGGGAAGAAAAAAATGACGGTACCTGAGGAATAAGCATCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGATGCAAGCGTTATCCGGAATGATTGGGCGTAAAGGGTCCGCAGGTGGCATTGTAAGTCTGCTGTTAAAGAGTTTGGCTCAACCAAATAAGAGCATTGGAAACTACAAAGCTAGAGTATGGTCGGGGCAGAGGGAATTCCTGGTGTAGCGGTGAAATGCGTAGATATCAGGAAGAACACCGGTGGCGAAGGCGCTCTGCTAGGCCAAAACTGACACTGAGGGACGAAAGCTAGGGGAGCGAATG"
 "ASV_101064" - "TGGGGAATTTTCCGCAATGGGCGAAAGCCTGACGGAGCAATACCGCGTGAGGGAGGAAGGCTCTTGGGTTGTAAACCTCTTTTCTCAGGGAAGAAAAAAATGACGGTACCTGAGGAATAAGCATCGGCTAACTCCGTGCCAGCAGCCGCGGTAATACGGAGGATGCAAGCGTTATCCGGAATGATTGGGCGTAAAGGGTCCGCAGGTGGCATTGTAAGTCTGCTGTTAAAGAGTTTGGCTCAACCAAATAAGAGCAGTGGAAACTACAAAGCTAGAGTATGGTCGGGGCAGAGGGAATTCCTGGTGTAGCGGTGAAATGCGTAGATATCAGGAAGAACACCGGTGGCGAAGGCGCTCTGCTAGGCCAAAACTGACACTGAGGGACGAAAGCTAGGGGAGCGAATG"
 ```
-To identify our 16S sequences, also nodularia will be placed in a tree? Unless they match in the blast, check this!
 
+## 16S placement according to dreher et al. 2021
+
+Placing the ssequence into the 16S reference tree of Dreher et al. the 16s sequence places in the ADA-4 group @fig-ASV_16s_placement.
+
+```{r}
+#| label: fig-ASV_16s_placement
+#| fig-cap: "Placement of 16S among reference sequences, highly abundant ASV is right below yellow-marked refseq."
+#| warning: false
+knitr::include_graphics("../results/placement.graft.placement.epa_result_Daniel.png")
+```
 
 # Compare counts and relative abundance to see if they line up well (maybe even a correlation).
 
@@ -999,10 +1008,9 @@ ggplotly(plot)
 
 ```
 
-
-
-Plotting the relevant ASV's together @fig-relevant_ASVs. Looking at this together with the phytocounts, it would appear that the patterns are better explained by the collective genus expression of several ASV's, as seen in @fig-16SAndPhytoCounts. THIS should be confirmed with correlation.   
+Plotting the relevant ASV's together @fig-relevant_ASVs. Looking at this together with the phytocounts, it would appear that the patterns are better explained by the collective genus expression of several ASV's, as seen in @fig-16SAndPhytoCounts. THIS should be confirmed with correlation.\
 While the large-scale patterns of peaks in summer are congruent, the peaks doesn't line up that well with the counts on a date-to-date basis. This could be due to the nature of the relative data, i.e if other ASV's are highly abundant, they may press down the relative abundance of for example Aphanizomenon, thus hampering the relationship between asbolute and relative abundance. For example the biomass in february 2017 is increasing, while the trend is decreasing in the 16s, in contrast there is also an increase in the gene expression during this date. Still both 16S and count data show a rather wide abundance window for Aphanizomenon.
+
 ```{r}
 #| label: fig-relevant_ASVs
 #| fig-cap: "16S relative- abundances of the major ASV's in the Dolichospermum genus, followed by phytocounts of Aphanizomenon"
@@ -1132,9 +1140,10 @@ phytoCount %>%
   xlab("month")
 ```
 
-
 ## Correlation of 16S abundances with phytocounts
+
 Not pretty, probably due to the bumpy values in 16S. Correlations are horrible @tbl-Correlation16SCounts.
+
 ```{r}
 #| label: tbl-Correlation16SCounts
 #| tbl-cap: "Spearman correlation between 16S features (ASV's and Species summaries) and Aphanizomenon biomass"
@@ -1192,6 +1201,92 @@ hmm <- matr %>%
   rename(pVal = "V1", rho = "V2", feature = "V3")
 
 kableExtra::kable(hmm,table.attr = "style='width:120%;'")
-  
 ```
 
+Trying a normal correlation-plot instead of a paired correlation @fig-Correlation16SCounts. Due to the log-scale behaviour, a meaningful relationship does not occur until phytoplankton bioomass is higher than 1 (0 on logscale), already on the genus level it we see a relationship, this appears to hold all the way down to the ASV-level where ASV_131100 appears to be the main responsible ASV.
+
+```{r}
+#| label: fig-Correlation16SCounts
+#| fig-cap: "relationship between counts and relative abundance"
+#| fig-subcap: 
+#|   - "Genus"
+#|   - "Species"
+#|   - "ASV's"
+#| warning: false
+
+
+#starting with genus
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+      filter(Genus == "Dolichospermum") %>%
+      group_by(Genus, date) %>%
+      summarise(relab = sum(relab)) %>%
+      ungroup() %>%
+      rename(Date = "date") %>%
+      mutate(Date = as.Date(Date)) %>%
+  inner_join(phytoCount %>% # joining in the biomass
+               filter(Year != "2020") %>%
+               filter(Genus %in% c("Aphanizomenon")) %>% 
+               group_by(Date, Genus) %>% 
+               summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>% 
+               ungroup() %>%
+               select(-Genus),
+             by = "Date"
+  ) %>%
+  select(-Genus) %>%
+  ggplot(mapping = aes(x = log(Biomass_mgC_m3), y = log(relab))) +
+  geom_point()+
+  geom_smooth()
+
+#Looking at the dominant species (i.e flosaquae and Dolichospermum sp000312705)
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+      filter(Genus == "Dolichospermum") %>%
+  filter(Species %in% c("Dolichospermum sp000312705","Dolichospermum flosaquae")) %>%
+      group_by(Species, date) %>%
+      summarise(relab = sum(relab)) %>%
+      ungroup() %>%
+      rename(Date = "date") %>%
+      mutate(Date = as.Date(Date)) %>%
+  inner_join(phytoCount %>% # joining in the biomass
+               filter(Year != "2020") %>%
+               filter(Genus %in% c("Aphanizomenon")) %>% 
+               group_by(Date, Genus) %>% 
+               summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>% 
+               ungroup() %>%
+               select(-Genus),
+             by = "Date"
+  ) %>%
+  ggplot(mapping = aes(x = log(Biomass_mgC_m3), y = log(relab), colour = Species)) +
+  geom_point()+
+  geom_smooth()
+
+#Plotting the most abundant ASV's in this one
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(ASV_name %in% ASVVec) %>%
+  group_by(ASV_ID, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  rename(Date = "date") %>%
+  mutate(Date = as.Date(Date)) %>%
+  inner_join(phytoCount %>% # joining in the biomass
+               filter(Year != "2020") %>%
+               filter(Genus %in% c("Aphanizomenon")) %>% 
+               group_by(Date, Genus) %>% 
+               summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>% 
+               ungroup() %>%
+               select(-Genus),
+             by = "Date"
+  ) %>%
+  inner_join(asv_tax_species %>% distinct(ASV_ID, ASV_name), by = "ASV_ID") %>%
+  ggplot(mapping = aes(x = log(Biomass_mgC_m3), y = log(relab), colour = ASV_name)) +
+  geom_point()+
+  geom_smooth()
+
+```
+
+```{r}
+
+
+```
