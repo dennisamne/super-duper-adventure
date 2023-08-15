@@ -73,6 +73,10 @@ SEASON_COLOURS = c("spring" = "#33A02C", "summer" = "#E31A1C",  "autumn" =  "#FF
   
   # Orf-file
 cds_table<- read_tsv("../data/cds_counts_filtered.tsv")
+
+COG_cats <- read_tsv("../data/COG_categories.tsv") %>%
+  rename(COG_Functional_Category = "COG_category")
+
 ```
 
 ```{r}
@@ -99,9 +103,13 @@ cds_table_filtered <- cds_table %>%  inner_join(lmo_id_date, by = "sample") %>% 
 genes_and_paths_top50 %>% semi_join(cds_table_filtered, by = c("MAG","dates")) -> filtered_genes_and_paths_top50
 ```
 
-## PCA/nMDS
+# Intro
 
-PCA plotting of Aphanizomenon orf-level expression produces a clear separation between summer time expression and the three other seasons (@fig-PCA_orf_level).
+This document handles gene expression analysis of BACL63, or P1994_122_bin236, short about the BACL: It is 99.89% complete, 0.89% contamination, of which 80% is explained by strain heterogeneity (closely related contamination).
+
+## PCA
+
+PCA plotting of Aphanizomenon orf-level expression based on bray-curtis distances of hellinger transformed counts produces a clear separation between summer expression and the three other seasons (@fig-PCA_orf_level). One could take it a step further and separate summer into early- and late summer respectively.
 
 ```{r}
 #| label: fig-PCA_orf_level
@@ -261,9 +269,7 @@ df %>%
 cyc.genes.tres <- read_tsv("../data/cyclical_genes_aphani.tres.tsv")
 ```
 
-To identify seasonal expression patterns, a RAIN analysis on the orf-level of Aphanizomenon revealed that `r length(which(cyc.genes.tres$fdr <= 0.05))` out of `r nrow(cyc.genes.tres)` showed significant seasonal expression patterns. The annotation of every orf and its corresponding fdr-adjusted p-value is provided in table 
-@fig-Rain_table_supp. (Quarto doesn't recognize datatable-output as a table so bear with me here).
-Analysis was run on the within-mag normalised tpm values (all genes in the MAG summarised per date adds up to a million).
+To identify seasonal expression patterns, a [RAIN](https://pubmed.ncbi.nlm.nih.gov/25326247/) analysis on the orf-level of Aphanizomenon revealed that `r length(which(cyc.genes.tres$fdr <= 0.05))` out of `r nrow(cyc.genes.tres)` showed significant seasonal expression patterns. The annotation of every orf and its corresponding fdr-adjusted p-value is provided in table @fig-Rain_table_supp. (Quarto doesn't recognize datatable-output as a table so bear with me here). Analysis was run on the within-mag normalised tpm values (all genes in the MAG summarised per date adds up to a million).
 
 ```{r}
 #| label: fig-Rain_table_supp
@@ -319,5 +325,111 @@ filtered_genes_and_paths_top50 %>%
   scale_colour_manual('Season', values = SEASON_COLOURS)
 ```
 
-## Genes of interest in each of these clusters???
+### COG-summary of RAIN Genes as opposed to non-RAIN genes
 
+a quick COG-functional summary partitioned among the RAIN and non-RAIN genes show that both energy metabolism and Translation, ribosomal structure and biogenesis exhibit summer peaks @fig-COG_catsRAIN. Instead the non-seasonal genes exhibit a stable pattern overall, as expected.
+```{r}
+#| label: fig-COG_catsRAIN
+#| fig-cap: summarised tpm values of rain and non-rain genes across the different functional COG-categories.
+#| fig-subcap: 
+#|   - "RAIN-genes"
+#|   - "non-RAIN-genes."
+#| warning: false
+
+scale25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+
+
+filtered_genes_and_paths_top50 %>%
+  inner_join(season_info, by = "Geneid") %>%
+   semi_join(cyc.genes.tres %>% filter(type == "sig"), by = "Geneid") %>%
+  inner_join(eggnog_table %>%
+               distinct(Geneid, COG_Functional_Category,
+                        by = "Geneid")) %>%
+  separate_rows(COG_Functional_Category, sep = "(?<=.)(?=.)") %>%
+  filter(!is.na(COG_Functional_Category)) %>%
+  group_by(dates, COG_Functional_Category) %>%
+  summarise(tpm = sum(tpm)) %>%
+  ungroup() %>%
+  inner_join(COG_cats, by = "COG_Functional_Category") %>%
+  ggplot(mapping = aes(x = dates, y = tpm, fill = full_name)) +
+  geom_area( ) +
+  theme_bw() +
+  scale_fill_manual('COG category', values = scale25)
+
+filtered_genes_and_paths_top50 %>%
+  inner_join(season_info, by = "Geneid") %>%
+   semi_join(cyc.genes.tres %>% filter(type == "non-sig"), by = "Geneid") %>%
+  inner_join(eggnog_table %>%
+               distinct(Geneid, COG_Functional_Category,
+                        by = "Geneid")) %>%
+  separate_rows(COG_Functional_Category, sep = "(?<=.)(?=.)") %>%
+  filter(!is.na(COG_Functional_Category)) %>%
+  group_by(dates, COG_Functional_Category) %>%
+  summarise(tpm = sum(tpm)) %>%
+  ungroup() %>%
+   inner_join(COG_cats, by = "COG_Functional_Category") %>%
+  ggplot(mapping = aes(x = dates, y = tpm, fill = full_name)) +
+  geom_area( ) +
+  theme_bw() +
+  scale_fill_manual('COG category', values = scale25) +
+  guides(fill = guide_legend(ncol=1))
+```
+
+## Identify metabolism genes of interest and place them in the respective clusters.
+```{r}
+#| label: geneVecs
+#| warning: false
+#List of genes of interest, also see Ericks list of interesting genes.
+
+VecOfvecs <- c(PS2, PS1, Antenna_proteins, n_fixation, c_fixation, sunscreen_genes, Phosphorus_scav_genes, HeteroDiffGenes, SigFac, GasVesgenes,Microcystin, Anabaenopeptilide, Anabaenopeptin, Anabaenolysin, Anacyclamide, Anatoxin_a, Hassallidin, Aeruginosin, Anabaenopeptin_Pseudospumigin_Microviridin, Geosmin, CylindrospermopsinGenes)
+
+#photosystem genes" -" PSI and PS22, look at the modules, as seen by Evangelia" "Genes of interest: PS2 Psb[A-F], PS1 psa[A-O], psaX"
+ PS2 <- c("psbA", "psbB", "psbC", "psbD","psbE", "psbF")
+ PS1 <- c("psaA", "psaB","psbC","psbD","psbE","psbF", "psbG", "psbH","psbI","psbJ","psbK","psbL","psbM","psbN","psbO", "psaX")
+ Antenna_proteins <- c("apcA","apcB", "cpcA", "cpcB", "cpeA","cpeB", "cpeC" , "cpeD", "cpeE", "cpeR", "cpeS", "cpeT", "cpeU", "cpeY", "cpeZ")
+ 
+n_fixation <- c("nifH","nifD") # (The two usually expressed genes, nifH probably only relevant)
+c_fixation <- c("rbcL", "cbbL", "cbbM") #(From KEGG pathway, and oown knowledge) "RubisCo""M00165". 
+sunscreen_genes <-  c("scyA","scyB","scyC","scyD","scyE") #scyD is not part of core cassette. (Pichel et al. 2019)
+#"ribosomal genes" - ""
+Phosphorus_scav_genes <- c("pstS", "pstC", "pstA", "pstB")
+
+# From Ehira and Miyazaki 2015. See refs therein for origin of genes.
+  HeteroDiffGenes <- c("ntcA", "hetR")
+  SigFac  <- c("sigC", "sigE","sigG") #Sigmafactors related to differentitation triggered by N-starvation
+
+# From Österholm et al. 2020 TS2
+  GasVesgenes <- c("GvpW", "GvpV" ,"GvpG","GvpF","GvpK","GvpJ","GvpN","GvpC","GvpA")
+  #toxin genes" - ""
+     Microcystin <- c("McyH", "McyI", "McyF", "McyE", "McyJ", "McyD", "McyG", "McyA", "McyB", "McyC")
+     Anabaenopeptilide <- c("ApdG","ApdF","ApdE","ApdD","ApdB", "ApdA") #apdBA are pseudogenes
+     Anabaenopeptin <- c("AptE", "HphA","AptD","AptC","AptB","AptA2","AptA1")
+     Anabaenolysin <- c("CamA", "AblA", "AblB", "AblC", "AblD", "AblE")
+     Anacyclamide <- c("AcyC", "AcyB","AcyA","AcyE","AcyE","AcyF","AcyG")
+     Anatoxin_a <- c("AnaB", "AnaC", "AnaD", "AnaE", "AnaF", "AnaG", "AnaA")
+     Hassallidin <- c("HasZ", "HasY", "HasX" ,"HasW" ,"HasV" ,"HasU" ,"HasT" ,"HasS" ,"HasR" ,"HasQ" ,"HasP" ,"HasO" ,"HasN" ,"HasM" ,"HasL" ,"HasK" ,"HasJ" ,"HasI" ,"HasH" ,"HasG" ,"HasF" ,"HasE" ,"HasD" ,"HasC" ,"HasB" ,"HasA")
+     Aeruginosin <- c("AerD", "AerE","AerF","AerG1","AerG2","AerA","AerB")  #AerD and AerG1 are pseudogenes
+     Anabaenopeptin_Pseudospumigin_Microviridin <- c("SpuF", "SpuB", "SpuA", "HphB", "HphCD", "AptA", "AptB", "AptC", "AptD", "HphA", "AptE", "MvdA", "MvdB", "MvdC", "MvdE")
+     Geosmin <- c("Cnb1","Cnb2" , "GeoA")
+
+# From Mihali et al. 2008
+  CylindrospermopsinGenes <- c("aoaA","aoaB","aoaC","cyrJ", "cyrA", "cyrB","cyrC", "cyrD", "cyrE", "cyrF", "cyrG", "cyrH", "cyrI", "cyrJ", "cyrK", "cyrL", "cyrM", "cyrN", "cyrO")
+
+```
+
+
+## Short info on winter activities, relate to Svedén et al. 2015.
