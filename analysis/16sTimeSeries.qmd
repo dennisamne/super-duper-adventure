@@ -92,6 +92,59 @@ phytoCount <- read_tsv("../data/phyto_counts_USE_20210614.tsv") %>%
   filter(!is.na(Biomass_mgC_m3)) %>%# Removing NA's from dataset as they interfere with operations
   mutate(Year = str_extract(Date, "[0-9][0-9][0-9][0-9]")) # Adding year as a separate column
 
+lmo_metadata <- read_tsv("../data/LMO_metadata1.tsv.gz", col_types = cols(.default = col_number(), Chla_Average = col_number(), Date = col_datetime())) %>%
+rename(dates = "Date")
+
+```
+
+## Metadata
+
+The LMO timeseries abiotic and biotic variables exhibited seasonal patterns (@fig-Abioticdata).
+
+```{r}
+#| label: fig-Abioticdata
+#| fig-cap: "Biotic and abiotic variables at the LMO station during years 2011-2019."
+#| warning: false
+# Alternative with temp + inorganic nutrients + chla + cell abundance
+variable_names <- list(
+  'Chla_Average'= bquote('Chla Average' ~(µgL^-1)),
+  'Temperature_C'="Temperature (\u00b0C)",
+  'Nitrate_Average'= bquote('Nitrate' ~(µM)),
+  'Phosphate_Average' = bquote('Phosphate' ~(µM)),
+  'Salinity_PSU' = 'Salinity (PSU)'
+)
+
+variable_labeller <- function(variable,value){
+  return(variable_names[value])
+}
+
+plot <- lmo_metadata %>%
+  select(dates, Temperature_C, Salinity_PSU,Chla_Average, Nitrate_Average, Phosphate_Average) %>%
+  pivot_longer(cols = c(2:6), names_to = "variable") %>%
+  mutate(variable = factor(variable, levels = c("Temperature_C","Nitrate_Average","Phosphate_Average","Chla_Average","Salinity_PSU"))) %>%
+  mutate(Year = str_extract(dates, "[0-9][0-9][0-9][0-9]")) %>%
+  mutate(dates = as.Date(dates)) %>%
+  mutate(year_day = case_when(Year == "2011" ~ julian(dates, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(dates, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(dates, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(dates, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(dates, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(dates, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(dates, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(dates, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(dates, origin = as.Date("2019-01-01"))
+                              )) %>%
+            ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y =value, colour = Year)) +
+  geom_line() +
+  facet_wrap(variable ~ ., labeller=variable_labeller, scales = "free_y") +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("") +
+  ylab('') +
+  theme_minimal() +
+  scale_colour_manual('Year', values = YEAR_COLOURS) 
+
+ggplotly(plot)
+  
 ```
 
 ## Phytoplankton counts overview
@@ -123,6 +176,50 @@ phytoCount %>%
   scale_color_manual('Class', values = GEOM_COL_COLOURS) +
   geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed")
 ```
+
+Making the relative abundance compositional we see that Nostocophyceae constitute up to 75% of the phytoplankton biomass in summer @fig-relativeBio. 
+```{r}
+#| label: fig-relativeBio
+#| fig-cap: "Biomass values for the most abundant classes in the phytocount dataset at the LMO-station from year 2011-2020. with relative abundance."
+#| warning: false
+
+
+phytoCount %>%
+  mutate(Class = ifelse(Class %in% top11, paste0(Class),paste0("Other"))) %>%
+  group_by(Date) %>%
+  mutate(percentage = Biomass_mgC_m3/sum(Biomass_mgC_m3)) %>%
+  ungroup() %>%
+  group_by(Date, Class) %>%
+  summarise(percentage = sum(percentage)) %>%
+  ungroup() %>%
+  inner_join(phytoCount %>% distinct(Year, Date), by = "Date") %>% #Reinserting year information
+  mutate(year_day = case_when(Year == "2011" ~ julian(Date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(Date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(Date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(Date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(Date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(Date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(Date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(Date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(Date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>% #Adding Julian day information
+  filter(Year != "2020") %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = percentage, fill = Class)) +
+  geom_col(width = 4) +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  scale_fill_manual('Class', values = GEOM_COL_COLOURS) +
+  facet_wrap(~ Year) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("dates")
+
+ggsave("../results/PhytoCountRel.png")
+
+```
+
+
 
 Listing the different shapes and sizeclasses within the nostocophyceae (see table below for all different combinations). For Aphanizomenon specifically it appears to have the same sizerange, minus the ND, to investigate this Aphanizomenon will be plotted in isolation.
 
@@ -237,10 +334,14 @@ phytoCount %>%
   ggplot(mapping = aes(x = Date, y = Biomass_mgC_m3, group = Genus, colour = Genus)) +
   geom_line() +
   theme_minimal() +
+  theme(legend.position = "bottom") +
   #scale_color_manual('Genus', values = GEOM_COL_COLOURS)  +
   #geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed") +
   facet_wrap(~ Year, scales = "free") +
   scale_x_date(date_breaks = "2 months", date_labels = "%b")
+
+ggsave("../results/CountNostocGenus.png", bg = "white")
+
 ```
 
 ## 16S data overview
@@ -324,6 +425,107 @@ asv_tables %>%
   ungroup()
 ```
 
+### Nostocales relative community expression
+
+Of total community, both the group Nostococeaea (filamentous cyanos) and Cyanobiaceae (picos(?)) were abundant in summer @fig-16SNostocaceaeRelab. Personally I think that subpanel b makes the abundance of Nostocaceae clear, while panel a makes it hard so see due to the patchiness of the figure.
+```{r}
+#| label: fig-16SNostocaceaeRelab
+#| fig-cap: "Relative abundance of the most abundant families in the dataset."
+#| fig-subcap: 
+#|   - "Whole community included"
+#|   - "Only Nostococeae"
+#| warning: false
+
+relab_table <- asv_tables %>%
+  inner_join(sample_ID, by = "sample") %>%
+  group_by(date,ASV_ID) %>%
+  summarise(count = mean(count)) %>%
+  ungroup() %>%
+  group_by(date) %>%
+  mutate(relab = count/sum(count)) %>%
+  ungroup() 
+
+#Making a top ten family vector
+top11vec <- relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  group_by(Family) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  arrange(desc(relab)) %>%
+  slice(1:11) %>%
+  pull(Family)
+
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>% 
+  mutate(Family = ifelse(Family %in% top11vec, paste0(Family), paste0("Other"))) %>%
+  group_by(Family, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  #filter(Family == "Nostocaceae") %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab, fill = Family)) +
+  geom_area() +
+  facet_wrap(~ Year) +
+ scale_fill_manual('Family', values = GEOM_COL_COLOURS) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("month")
+
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>% 
+  mutate(Family = ifelse(Family %in% top11vec, paste0(Family), paste0("Other"))) %>%
+  group_by(Family, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  filter(Family == "Nostocaceae") %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab, fill = Family)) +
+  geom_area() +
+  facet_wrap(~ Year) +
+ scale_fill_manual('Family', values = GEOM_COL_COLOURS) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("month")
+```
+
 Plotting all Nostocales expression at the LMO. In SBDI they are considered a family "Nostocaceae". It becomes evident that only Nodularia and Dolichospermum are relatively abundant (@fig-Nostocaceae). And that Dolichospermum is the main contributor to Nostocaceae abundance.
 
 ```{r}
@@ -375,6 +577,77 @@ relab_table %>%
   scale_x_date(date_breaks = "2 months", date_labels = "%b") +
   xlab("month")
 ```
+
+### Overlaying the geom area with the line graph of the ASV's
+Plotting the total Nostocaceae abundance it is clear to see that Dolichospermum is the main contributor to relative abundance @fig-NostocaceaeDolicho.
+
+```{r}
+#| label: fig-NostocaceaeDolicho
+#| fig-cap: "Relative abundance of all genuses in the nostocaceae family. Grey area is the relative abundance of the Nostocaceae family"
+#| warning: false
+df1 <- relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>% 
+  mutate(Family = ifelse(Family %in% top11vec, paste0(Family), paste0("Other"))) %>%
+  group_by(Family, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  filter(Family == "Nostocaceae") 
+  
+ df2 <-  relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(Family == "Nostocaceae") %>%
+  group_by(Genus, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           )
+   
+ ggplot(data = df2, mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab, fill = Genus, group = Genus, colour = Genus)) +
+   geom_line() +
+  #geom_line(data = df2, aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab, fill = Genus, group = Genus)) +
+  geom_area(inherit.aes = FALSE, data = df1, aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab), alpha = 0.3) +
+  geom_point() +
+  facet_wrap(~ Year) +
+ scale_color_manual('Genus', values = GEOM_COL_COLOURS) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 8, colour = "black"),
+        legend.title = element_text(size = 8, face = "bold", colour = "black"),
+        legend.text = element_text(size = 8, colour = "black"),
+        axis.text = element_text(size = 8, colour = "black"),
+        axis.title = element_text(size = 8, face = "bold", colour = "black")
+        ) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("month") +
+  ylab("relative abundance")
+ 
+ ggsave("../results/16S_NostocAndGenus.png", bg = "white")
+```
+
 
 Proceeding with the Dolichos in the SBDI to look at dynamics.
 
@@ -1286,6 +1559,7 @@ relab_table %>%
 
 ```
 
+## Recurrence analysis of ASV_131100.
 ```{r}
 
 
