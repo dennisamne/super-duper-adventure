@@ -84,7 +84,10 @@ asv_tables <- asv_tables %>%
  # mutate(ASV_name = paste0("ASV",row_number())) 
 
 #Reading in a key for cruisnumber to date
-LMODate <- read_tsv("../data/LMOCruiseToDate.tsv")
+LMODate <- read_tsv("../data/LMOCruiseToDate.tsv") %>%
+   mutate(season = ifelse(grepl("201[0-9]-0[3-5]-", Date), "spring",
+                           ifelse(grepl("201[0-9]-0[6-8]-", Date), "summer",
+                                  ifelse(grepl("201[0-9]-09-|201[0-9]-10-|201[0-9]-11-", Date), "autumn", "winter"))))
 
 # Reading in phytoplankton count figure and converting to understandable format and joining in dates
 phytoCount <- read_tsv("../data/phyto_counts_USE_20210614.tsv") %>% 
@@ -331,13 +334,23 @@ phytoCount %>%
   summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>%
   ungroup() %>%
   inner_join(phytoCount %>% distinct(Date, Year), by = "Date") %>%
-  ggplot(mapping = aes(x = Date, y = Biomass_mgC_m3, group = Genus, colour = Genus)) +
+  mutate(year_day = case_when(Year == "2011" ~ julian(Date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(Date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(Date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(Date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(Date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(Date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(Date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(Date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(Date, origin = as.Date("2019-01-01"))
+                              )) %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = Biomass_mgC_m3, group = Genus, colour = Genus)) +
   geom_line() +
   theme_minimal() +
   theme(legend.position = "bottom") +
   #scale_color_manual('Genus', values = GEOM_COL_COLOURS)  +
   #geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed") +
-  facet_wrap(~ Year, scales = "free") +
+  facet_wrap(~ Year, scales = "free_y") +
   scale_x_date(date_breaks = "2 months", date_labels = "%b")
 
 ggsave("../results/CountNostocGenus.png", bg = "white")
@@ -1559,8 +1572,56 @@ relab_table %>%
 
 ```
 
-## Recurrence analysis of ASV_131100.
+## ANOVA test on different seasonal abundances
+An abundance test of seasons revealed significant differences between summer-spring and summer-autumn, however no significat difference wqas observed between summer and winter @fig-ANOVA.
 ```{r}
+#| label: fig-ANOVA
+#| fig-cap: "boxplots with anova and tukeys test on the abundance of ASV_131100 and seasons."
+#| fig-subcap: 
+#|   - "Boxplots of relative abundances, vertical line in box denotes median value. "
+#|   - "Tukey's pairwise test of significance."
+#| warning: false
 
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(ASV_name == "ASV_131100") %>%
+  group_by(ASV_ID, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(date = as.Date(date)) %>%
+  inner_join(LMODate %>% distinct(Date, season) %>% rename(date = "Date"), by = "date") %>%
+  ggplot(mapping = aes(season, relab)) +
+  geom_boxplot() +
+  theme_minimal()
 
+#Running an ANOVA to test this
+
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(ASV_name == "ASV_131100") %>%
+  group_by(ASV_ID, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(date = as.Date(date)) %>%
+  inner_join(LMODate %>% distinct(Date, season) %>% rename(date = "Date"), by = "date") %>%
+  select(season, relab) %>%
+  aov(data =., relab ~ season) %>%
+  summary()
+
+#Posthoc test
+model <- relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(ASV_name == "ASV_131100") %>%
+  group_by(ASV_ID, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(date = as.Date(date)) %>%
+  inner_join(LMODate %>% distinct(Date, season) %>% rename(date = "Date"), by = "date") %>%
+  select(season, relab) %>%
+  aov(data =., relab ~ season)
+
+TukeyHSD(model, conf.level = .95)
+#According to tukey's test the abundance is significantly different between summer-autumn and summer-spring.
+
+plot(TukeyHSD(model, conf.level = .95), las = 2)
 ```
