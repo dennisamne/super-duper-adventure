@@ -180,7 +180,8 @@ phytoCount %>%
   geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed")
 ```
 
-Making the relative abundance compositional we see that Nostocophyceae constitute up to 75% of the phytoplankton biomass in summer @fig-relativeBio. 
+Making the relative abundance compositional we see that Nostocophyceae constitute up to 75% of the phytoplankton biomass in summer @fig-relativeBio.
+
 ```{r}
 #| label: fig-relativeBio
 #| fig-cap: "Biomass values for the most abundant classes in the phytocount dataset at the LMO-station from year 2011-2020. with relative abundance."
@@ -221,8 +222,6 @@ phytoCount %>%
 ggsave("../results/PhytoCountRel.png")
 
 ```
-
-
 
 Listing the different shapes and sizeclasses within the nostocophyceae (see table below for all different combinations). For Aphanizomenon specifically it appears to have the same sizerange, minus the ND, to investigate this Aphanizomenon will be plotted in isolation.
 
@@ -344,14 +343,23 @@ phytoCount %>%
                               Year == "2018" ~ julian(Date, origin = as.Date("2018-01-01")),
                               Year == "2019" ~ julian(Date, origin = as.Date("2019-01-01"))
                               )) %>%
+  filter(Year != "2020") %>%
   ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = Biomass_mgC_m3, group = Genus, colour = Genus)) +
   geom_line() +
   theme_minimal() +
-  theme(legend.position = "bottom") +
+  ylab(bquote('Biomass '(mgCm^-3))) +
+  theme(legend.position = "bottom",
+        axis.text.y = element_text(size = 8, colour = "black"),
+        axis.text.x = element_text(size = 8, colour = "black"),
+        axis.title.x = element_text(size = 8, colour = "black", face = "bold"),
+        axis.title.y = element_text(size = 8, colour = "black", face = "bold")
+        ) +
   #scale_color_manual('Genus', values = GEOM_COL_COLOURS)  +
   #geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed") +
   facet_wrap(~ Year, scales = "free_y") +
-  scale_x_date(date_breaks = "2 months", date_labels = "%b")
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("Dates") 
+  
 
 ggsave("../results/CountNostocGenus.png", bg = "white")
 
@@ -441,6 +449,7 @@ asv_tables %>%
 ### Nostocales relative community expression
 
 Of total community, both the group Nostococeaea (filamentous cyanos) and Cyanobiaceae (picos(?)) were abundant in summer @fig-16SNostocaceaeRelab. Personally I think that subpanel b makes the abundance of Nostocaceae clear, while panel a makes it hard so see due to the patchiness of the figure.
+
 ```{r}
 #| label: fig-16SNostocaceaeRelab
 #| fig-cap: "Relative abundance of the most abundant families in the dataset."
@@ -592,6 +601,7 @@ relab_table %>%
 ```
 
 ### Overlaying the geom area with the line graph of the ASV's
+
 Plotting the total Nostocaceae abundance it is clear to see that Dolichospermum is the main contributor to relative abundance @fig-NostocaceaeDolicho.
 
 ```{r}
@@ -660,7 +670,6 @@ df1 <- relab_table %>%
  
  ggsave("../results/16S_NostocAndGenus.png", bg = "white")
 ```
-
 
 Proceeding with the Dolichos in the SBDI to look at dynamics.
 
@@ -1573,7 +1582,9 @@ relab_table %>%
 ```
 
 ## ANOVA test on different seasonal abundances
+
 An abundance test of seasons revealed significant differences between summer-spring and summer-autumn, however no significat difference wqas observed between summer and winter @fig-ANOVA.
+
 ```{r}
 #| label: fig-ANOVA
 #| fig-cap: "boxplots with anova and tukeys test on the abundance of ASV_131100 and seasons."
