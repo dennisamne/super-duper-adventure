@@ -108,12 +108,12 @@ The LMO timeseries abiotic and biotic variables exhibited seasonal patterns (@fi
 #| label: fig-Abioticdata
 #| fig-cap: "Biotic and abiotic variables at the LMO station during years 2011-2019."
 #| warning: false
-# Alternative with temp + inorganic nutrients + chla + cell abundance
+# Alternative with temp + inorganic nutrients + chla + cell abundance. It is important that the labeller matches the order of the facet wrap, otherwise the names will appear in the wrong order.
 variable_names <- list(
-  'Chla_Average'= bquote('Chla Average' ~(µgL^-1)),
   'Temperature_C'="Temperature (\u00b0C)",
   'Nitrate_Average'= bquote('Nitrate' ~(µM)),
   'Phosphate_Average' = bquote('Phosphate' ~(µM)),
+  'Chla_Average'= bquote('Chla Average' ~(µgL^-1)),
   'Salinity_PSU' = 'Salinity (PSU)'
 )
 
@@ -121,7 +121,7 @@ variable_labeller <- function(variable,value){
   return(variable_names[value])
 }
 
-plot <- lmo_metadata %>%
+lmo_metadata %>%
   select(dates, Temperature_C, Salinity_PSU,Chla_Average, Nitrate_Average, Phosphate_Average) %>%
   pivot_longer(cols = c(2:6), names_to = "variable") %>%
   mutate(variable = factor(variable, levels = c("Temperature_C","Nitrate_Average","Phosphate_Average","Chla_Average","Salinity_PSU"))) %>%
@@ -139,14 +139,14 @@ plot <- lmo_metadata %>%
                               )) %>%
             ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y =value, colour = Year)) +
   geom_line() +
-  facet_wrap(variable ~ ., labeller=variable_labeller, scales = "free_y") +
+  facet_wrap(variable ~ ., labeller=variable_labeller, scales = "free_y") + 
   scale_x_date(date_breaks = "2 months", date_labels = "%b") +
   xlab("") +
   ylab('') +
   theme_minimal() +
   scale_colour_manual('Year', values = YEAR_COLOURS) 
 
-ggplotly(plot)
+
   
 ```
 
