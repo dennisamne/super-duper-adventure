@@ -40,7 +40,7 @@ SEASON_COLOURS = c("spring" = "#33A02C", "summer" = "#E31A1C",  "autumn" =  "#FF
 #| label: files
 #| warning: false
 #| cache: true
-# Loading annotation file
+# Loading annotation file of expressed genes
   eggnog_names <- c("Geneid", "MAG", "contig", "Start", "End", "Strand", "Length", "seed_eggNOG_ortholog", "seed_ortholog_evalue", "seed_ortholog_score", "Predicted_taxonomic_group", "Predicted_protein_name", "Gene_Ontology_terms", "EC_number", "KEGG_ko", "KEGG_Pathway", "KEGG_Module", "KEGG_Reaction", "KEGG_rclass", "BRITE", "KEGG_TC", "CAZy", "BiGG Reaction", "tax_scope:eggNOG_taxonomic_level_used_for_annotation", "eggNOG_OGs", "bestOG", "COG_Functional_Category", "eggNOG_free_text_description", "sample", "counts")
   
   eggnog_table <- read_tsv("../data/eggnog_table_long.tsv.gz", col_types = cols(Start = col_integer(), End = col_integer(), Length = col_integer(), counts = col_integer(), X7 = col_character())) %>%
@@ -73,7 +73,7 @@ SEASON_COLOURS = c("spring" = "#33A02C", "summer" = "#E31A1C",  "autumn" =  "#FF
                              ifelse(grepl("*P1994*", MAG), "transect",
                                     ifelse(grepl("*SRR*", MAG), "askö", "LMO"))))
   
-  # Orf-file
+  # Orf-file incluing only expressed genes
 cds_table<- read_tsv("../data/cds_counts_filtered.tsv")
 
 COG_cats <- read_tsv("../data/COG_categories.tsv") %>%
@@ -82,6 +82,10 @@ COG_cats <- read_tsv("../data/COG_categories.tsv") %>%
 
 lmo_metadata <- read_tsv("../data/LMO_metadata1.tsv.gz", col_types = cols(.default = col_number(), Chla_Average = col_number(), Date = col_datetime())) %>% subset(Date > "2016-01-01" & Date < "2017-12-31") %>%
 rename(dates = "Date")
+
+#Dataframe with the annotated genes, even those not expressed
+all_annotations <- read_tsv("../data/eggnog_annotated.tsv.gz") %>%
+  select(1, "Chr", "X6")
 
 ```
 
@@ -748,7 +752,39 @@ SigInfo <- filtered_genes_and_paths_top50 %>%
     ) +
   scale_colour_manual('Gene', values = pathway_colour_palette) +
   guides(colour=guide_legend(ncol=2,byrow=FALSE)) +
-  scale_x_date(date_breaks = "2 months", date_labels = "%b")
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  annotate("rect",
+    xmin = as.Date.character("2016-03-01"),
+    xmax = as.Date.character("2016-05-31"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .37,
+    fill = "grey"
+    ) +
+  annotate("rect",
+    xmin = as.Date.character("2016-09-01"),
+    xmax = as.Date.character("2016-11-30"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .37,
+    fill = "grey"
+    ) +
+    annotate("rect",
+    xmin = as.Date.character("2017-03-01"),
+    xmax = as.Date.character("2017-05-31"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .37,
+    fill = "grey"
+    ) +
+     annotate("rect",
+    xmin = as.Date.character("2017-09-01"),
+    xmax = as.Date.character("2017-11-30"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .37,
+    fill = "grey"
+    )
  
  ggsave("../results/EcoGenes.png", width = 39, height = 16, units = "cm")
 ```
