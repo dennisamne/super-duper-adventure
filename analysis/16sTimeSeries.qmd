@@ -102,14 +102,13 @@ rename(dates = "Date")
 
 ```
 
-
 ## Creating a map of the LMO station
+
 ```{r}
-#Reading in a map of the Baltics
-mappu <- read_sf("https://raw.githubusercontent.com/R-CoderDotCom/data/main/ukraine.geojson")
+#Reading in country maps
 
 Finlandia <- read_sf("../data/MapAreas/FIN_adm/FIN_adm0.shp") %>%
-  st_transform(3152)
+  st_transform(3152) # Using EPSG 3152 system coordinates
 Sweden <- read_sf("../data/MapAreas/SWE_adm/SWE_adm0.shp") %>%
   st_transform(3152)
 Estonia <- read_sf("../data/MapAreas/EST_adm/EST_adm0.shp") %>%
@@ -120,7 +119,8 @@ Lithuania <- read_sf("../data/MapAreas/LTU_adm/LTU_adm0.shp") %>%
   st_transform(3152)
 Poland <- read_sf("../data/MapAreas/POL_adm/POL_adm0.shp") %>%
   st_transform(3152)
-#This works great, just find a shape file for The Baltic Sea and plot away!
+
+#To convert between coordinate systems I used https://epsg.io/
 
 ggplot() + # x is longitude, y is latitude
   geom_sf(data = Finlandia, colour = "black",fill = "white", lwd = 0.08) +
@@ -136,11 +136,12 @@ ggplot() + # x is longitude, y is latitude
       # = c(324612.719680, -281620.628068)
  #) +
   annotate("rect", xmin = 54499.033889 - 10000, xmax = 54499.033889 + 10000, ymin = -185279.558525 - 10000, ymax = -185279.558525 + 10000, fill = "black") 
-  
 
+ggsave("../results/LMO_map.pdf")
+  
 ```
 
-## Metadata
+## Environmental variables
 
 The LMO timeseries abiotic and biotic variables exhibited seasonal patterns (@fig-Abioticdata).
 
@@ -191,6 +192,28 @@ lmo_metadata %>%
         legend.title = element_text(size = 9, colour = "black", face = "bold")) +
   scale_colour_manual('Year', values = YEAR_COLOURS) 
 ```
+
+## Looking at Chla concentrations Jul-August and calculating yearly average PSU-values
+```{r}
+JULY_AUGUST <- c("-07-","-08-") #Defining period to compare values
+
+lmo_metadata %>%
+  filter(!is.na(Chla_Average)) %>% # Removing NA's
+  mutate(month = str_extract(dates, "-[0-9][0-9]-")) %>% #Numerical representation of months
+  filter(month %in% JULY_AUGUST) %>% #Subsetting to July/August
+  filter(Chla_Average %in% c(max(Chla_Average), min(Chla_Average))) #Subsetting to min/max values
+
+#Calculating yearly mean of PSU
+
+lmo_metadata %>%
+  filter(!is.na(Salinity_PSU)) %>%
+  mutate(year = str_extract(dates, "[0-9][0-9][0-9][0-9]")) %>%
+  group_by(year) %>%
+  summarise(mean_salinity = mean(Salinity_PSU)) %>%
+  ungroup() %>%
+  arrange(mean_salinity)
+```
+
 
 ## Phytoplankton counts overview
 
@@ -307,6 +330,7 @@ plot <- phytoCount %>%
 ggplotly(plot)
 ```
 
+
 Ordering the most abundant genuses of the full dataset we see that Aphanizomenon and Nodularia are in the top ten, while Dolichospermum end up at position 29. (I have not cleaned out cilliates and small flagellates).
 
 ```{r}
@@ -404,6 +428,8 @@ phytoCount %>%
   
 
 ggsave("../results/CountNostocGenus.png", bg = "white")
+
+
 
 ```
 
@@ -870,6 +896,8 @@ relab_table %>%
   xlab("Date") +
   ylab("Relative Abundance") +
   scale_x_date(date_breaks = "2 months", date_labels = "%b")
+
+ggsave("../results/16S_ASV_dynamics.png")
 ```
 
 The dominant ASV_131100 reaches peak-abundance in summer, from the period of Mid-June to end of July, with abundances ranging from \~9% up to \> 40%. In December 2012 the ASV reaches peak abundance of \> 30% in December. For the smoothing function, keepin mind that the uprise in December is caused by 2012.\
@@ -1618,23 +1646,125 @@ relab_table %>%
   ) %>%
   inner_join(asv_tax_species %>% distinct(ASV_ID, ASV_name), by = "ASV_ID") %>%
   ggplot(mapping = aes(x = log(Biomass_mgC_m3), y = log(relab), colour = ASV_name)) +
-  geom_point()+
+  geom_point() +
   geom_smooth()
 
 ```
 
+## Correlation between 16S and temperature, and correlation between biomass and temperature
+```{r}
+#Running correlation ov ASV_131100 which is the main ASV
+temp_ASV <- relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(ASV_name == "ASV_131100") %>%
+  group_by(ASV_ID, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  rename(dates = "date") %>% ## Joina in tempdata
+  mutate(dates = as.Date(dates)) %>%
+  inner_join(lmo_metadata %>% select(dates, Temperature_C) %>% mutate(dates = as.Date(dates)), by = "dates") %>%
+  mutate(relab = as.numeric(relab), Temperature_C = as.numeric(Temperature_C)) %>%
+  select(relab, Temperature_C) %>%
+  filter(relab > 0.01) %>%
+  as.matrix()
+
+# Very low correlation coefficient 0.1
+cor.test(temp_ASV[,1], temp_ASV[,2], method = "spearman")
+
+temp_ASV %>%
+  as.data.frame() %>%
+  ggplot(mapping = aes(x = Temperature_C, y = relab)) +
+  geom_smooth()
+
+
+#Now plotting the biomass vs Temperature
+
+ temp_biomass <- phytoCount %>% # joining in the biomass
+   filter(Year != "2020") %>%
+   filter(Genus %in% c("Aphanizomenon")) %>% 
+   group_by(Date, Genus) %>% 
+   summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>% 
+   ungroup() %>%
+   select(-Genus) %>%
+   rename(dates = "Date") %>% ## Joina in tempdata
+   mutate(dates = as.Date(dates)) %>%
+   inner_join(lmo_metadata %>% select(dates, Temperature_C) %>% mutate(dates = as.Date(dates)), by = "dates") %>%
+  select(Biomass_mgC_m3, Temperature_C) %>%
+  filter(Biomass_mgC_m3 > 0) %>%
+  as.matrix()
+ 
+ #Biomass much better indicator in this case
+ cor.test(temp_biomass[,1], temp_biomass[,2], method = "spearman")
+ 
+ #PLotting the relationship
+ 
+ temp_biomass %>%
+   as.data.frame() %>%
+   ggplot(mapping = aes(x = Temperature_C, y = Biomass_mgC_m3)) +
+   geom_smooth()
+```
+
+
 ## ANOVA test on different seasonal abundances
 
-An abundance test of seasons revealed significant differences between summer-spring and summer-autumn, however no significat difference wqas observed between summer and winter @fig-ANOVA.
+An abundance test of seasons revealed significant differences between summer-spring and summer-autumn, however no significat difference was observed between summer and winter @fig-ANOVA.
 
 ```{r}
 #| label: fig-ANOVA
-#| fig-cap: "boxplots with anova and tukeys test on the abundance of ASV_131100 and seasons."
+#| fig-cap: "boxplots with anova and tukeys test on the abundance of nostocales, and ASV_131100 and seasons."
 #| fig-subcap: 
 #|   - "Boxplots of relative abundances, vertical line in box denotes median value. "
 #|   - "Tukey's pairwise test of significance."
 #| warning: false
 
+# Test on the Nostocales abundance
+
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(Family == "Nostocaceae") %>%
+  group_by(Family, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(date = as.Date(date)) %>%
+  inner_join(LMODate %>% distinct(Date, season) %>% rename(date = "Date"), by = "date") %>%
+  ggplot(mapping = aes(season, relab)) +
+  geom_boxplot() +
+  theme_minimal()
+
+#Running ANOVA
+
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(Family == "Nostocaceae") %>%
+  group_by(Family, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(date = as.Date(date)) %>%
+  inner_join(LMODate %>% distinct(Date, season) %>% rename(date = "Date"), by = "date") %>%
+  select(season, relab) %>%
+  aov(data =., relab ~ season) %>%
+  summary()
+
+#Tukey's
+model <- relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(Family == "Nostocaceae") %>%
+  group_by(Family, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(date = as.Date(date)) %>%
+  inner_join(LMODate %>% distinct(Date, season) %>% rename(date = "Date"), by = "date") %>%
+  select(season, relab) %>%
+  aov(data =., relab ~ season) 
+
+
+TukeyHSD(model, conf.level = .95)
+#According to tukey's test the abundance is significantly different between summer-autumn and summer-spring.
+
+plot(TukeyHSD(model, conf.level = .95), las = 2)
+
+
+# Test on ASV_131100
 relab_table %>%
   inner_join(asv_tax_species, by = "ASV_ID") %>%
   filter(ASV_name == "ASV_131100") %>%
@@ -1646,6 +1776,7 @@ relab_table %>%
   ggplot(mapping = aes(season, relab)) +
   geom_boxplot() +
   theme_minimal()
+
 
 #Running an ANOVA to test this
 
