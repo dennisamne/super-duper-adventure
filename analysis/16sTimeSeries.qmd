@@ -228,13 +228,17 @@ top11 <- phytoCount %>%
   group_by(Class) %>%
   summarise(Biomass_mgC_m3 = mean(Biomass_mgC_m3)) %>%
   ungroup() %>%
+  filter(!Class %in% c("Litostomatea", "0")) %>%
+  filter(!is.na(Class)) %>%
   arrange(desc(Biomass_mgC_m3)) %>%
   slice(1:11) %>%
   pull(Class)
 
 
 phytoCount %>%
-  mutate(Class = ifelse(Class %in% top11, paste0(Class),paste0("Other"))) %>%
+  filter(!Class %in% c("Litostomatea", "0")) %>%
+  filter(!is.na(Class)) %>%
+  mutate(Class = ifelse(Class %in% top11, paste0(Class), paste0("Other"))) %>%
   group_by(Date, Class) %>%
   summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>%
   ungroup() %>%
@@ -254,6 +258,8 @@ Making the relative abundance compositional we see that Nostocophyceae constitut
 
 
 phytoCount %>%
+  filter(!Class %in% c("Litostomatea", "0")) %>%
+  filter(!is.na(Class)) %>%
   mutate(Class = ifelse(Class %in% top11, paste0(Class),paste0("Other"))) %>%
   group_by(Date) %>%
   mutate(percentage = Biomass_mgC_m3/sum(Biomass_mgC_m3)) %>%
@@ -275,16 +281,17 @@ phytoCount %>%
            
            ) %>% #Adding Julian day information
   filter(Year != "2020") %>%
-  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = percentage, fill = Class)) +
+  mutate(Class = gsub(" ","\n", Class)) %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = percentage, fill = fct_relevel(Class, "Other", after = Inf))) +
   geom_col(width = 4) +
   theme_minimal() +
   theme(legend.position = "bottom") +
   scale_fill_manual('Class', values = GEOM_COL_COLOURS) +
   facet_wrap(~ Year) +
   scale_x_date(date_breaks = "2 months", date_labels = "%b") +
-  xlab("dates")
+  xlab("month")
 
-ggsave("../results/PhytoCountRel.png")
+ggsave("../results/PhytoCountRel.png", width = 18, units = "cm")
 
 ```
 
