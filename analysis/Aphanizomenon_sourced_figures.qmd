@@ -273,6 +273,7 @@ cds_table %>%
 #| label: rain-run
 #| warning: false
 #| cache: true
+
 for_rain <- cds_table %>%
     inner_join(lmo_id_date, by = "sample") %>%
     filter(filter_frac == "unfiltered") %>%
@@ -290,10 +291,6 @@ for_rain <- cds_table %>%
 all_weeks <- as.data.frame(seq(from = 1, to = 104, by = 1)) 
 
 colnames(all_weeks) <- "week"
-
-mag_list = list()
-
-sig_cor_mag <- "P1994_122_bin236"
 
 # Making the table again with counts, to exclude low counts, use this as a semijoin by Geneid beforfe spreading
 
@@ -322,64 +319,70 @@ counts_filter2 <- cds_table %>%
     group_by(Geneid) %>%
     tally() %>%
     ungroup() %>%
-    filter(n > 2)
+    filter(n > 5)
   
 
 # This works, now make the argument for counts in 2 samples or less, e.g counts != 0 in 
 mag_time_points <- for_rain %>%
   mutate(year_day = julian(dates, origin = as.Date("2016-01-01"))) %>%
-  mutate(week = ceiling(year_day/7))  %>%
+  mutate(week = round(year_day/7))  %>%
   semi_join(filtered_genes_and_paths_top50, by = c("MAG","dates")) %>%
   semi_join(counts_filter, by = "Geneid") %>%
   filter(MAG == "P1994_122_bin236") %>%
   select(week, Geneid, tpm) %>%
   spread(Geneid, tpm, fill = 0)
 
-# Tally 
-
- mag_time_points <- mag_time_points  %>% 
- column_to_rownames("week") 
-
-for (n in sig_cor_mag) {
-  
-  # IN the loop
-mag_time_points <- for_rain %>%
-  mutate(year_day = julian(dates, origin = as.Date("2016-01-01"))) %>%
-  mutate(week = ceiling(year_day/7))  %>%
-  semi_join(filtered_genes_and_paths_top50, by = c("MAG","dates")) %>%
-  semi_join(counts_filter2, by = "Geneid") %>%
-  filter(MAG == n) %>%
-  select(week, Geneid, tpm) %>%
-  spread(Geneid, tpm, fill = 0) 
-
-# Joining in to create the measure.sequence vector
+ # Joining in to create the measure.sequence vector to account for uneven sampling points (i.e variation between weeks)
 vec <- all_weeks %>%
   left_join(mag_time_points, by = "week") %>%
   column_to_rownames("week") %>%
   replace(is.na(.), 0) %>%
-  mutate(vector = ifelse(rowSums(.) > 0, 1,0)) %>%
+  mutate(vector = ifelse(rowSums(.) > 0, 1,0)) %>% #This vector says that if there is a week put a 1, otherwise a 0
   select(vector)
 
-mag_time_points <- mag_time_points  %>% column_to_rownames("week") %>%
+
+ mag_time_points <- mag_time_points  %>% 
+ column_to_rownames("week") 
+ 
+ # Creating the matrix
+mag_time_points <- for_rain %>%
+  mutate(year_day = julian(dates, origin = as.Date("2016-01-01"))) %>%
+  mutate(week = round(year_day/7))  %>%
+  semi_join(filtered_genes_and_paths_top50, by = c("MAG","dates")) %>%
+  semi_join(counts_filter2, by = "Geneid") %>%
+  filter(MAG == "P1994_122_bin236") %>%
+  select(week, Geneid, tpm) %>%
+  spread(Geneid, tpm, fill = 0) %>%
+  column_to_rownames("week") %>%
   as.matrix()
 
 
-mag_list[[n]] <- rain::rain(mag_time_points, deltat = 1, period = 52, nr.series = 1 , measure.sequence= vec$vector)
+#Running RAIN
 
-print(n)
-}
+df <- rain::rain(mag_time_points, deltat = 1, period = 52, nr.series = 1 , measure.sequence= vec$vector, adjp.method = "Bonferroni", method = 'longitudinal')
 
-bind_rows(mag_list, .id = "mag") -> df
+
+
+
+#Calulating the coefficient of variation to use as a treshold for plotting.
+
+CV_info <- filtered_genes_and_paths_top50 %>%
+  inner_join(season_info, by = "Geneid") %>%
+  group_by(Geneid) %>%
+  summarise(CV = (sd(tpm)/mean(tpm)) *100) %>%
+  ungroup() 
+
 # Done on filtered dates > 3000 counts
 df %>%
-  mutate(fdr = p.adjust(pVal, method = "fdr")) %>%
   rownames_to_column("Geneid") %>% 
-  select(-mag) %>%
-  mutate(type = ifelse(fdr >= 0.05, "non-sig","sig")) %>%
+  inner_join(CV_info, by = "Geneid") %>%
+  mutate(type = ifelse(pVal <= 0.05 & CV >= 20, "sig","non-sig")) %>%
   write_tsv(.,"../data/cyclical_genes_aphani.tres.tsv")
+  
 
 cyc.genes.tres <- read_tsv("../data/cyclical_genes_aphani.tres.tsv")
 ```
+
 
 To identify seasonal expression patterns, a [RAIN](https://pubmed.ncbi.nlm.nih.gov/25326247/) analysis on the orf-level of Aphanizomenon revealed that `r length(which(cyc.genes.tres$fdr <= 0.05))` out of `r nrow(cyc.genes.tres)` showed significant seasonal expression patterns. The annotation of every orf and its corresponding fdr-adjusted p-value is provided in table @fig-Rain_table_supp. (Quarto doesn't recognize datatable-output as a table so bear with me here). Analysis was run on the within-mag normalised tpm values (all genes in the MAG summarised per date adds up to a million).
 
@@ -420,17 +423,6 @@ season_info <- filtered_genes_and_paths_top50 %>%
   ungroup() %>%
   select(-tpm)
 
-filtered_genes_and_paths_top50 %>%
-  inner_join(season_info, by = "Geneid") %>%
-  group_by(Geneid) %>%
-  mutate(zscore = (tpm - mean(tpm))/ sd(tpm) ) %>%
-  ungroup() %>%
-  semi_join(cyc.genes.tres %>% filter(type == "sig"), by = "Geneid") %>%
-  ggplot(mapping = aes(x = dates, y = zscore, colour = season)) +
-  theme_bw() +
-  theme(panel.grid = element_blank()) +
-  geom_smooth() +
-  scale_colour_manual('Season', values = SEASON_COLOURS)
 
 # Unsmoothed version
 filtered_genes_and_paths_top50 %>%
@@ -443,6 +435,36 @@ filtered_genes_and_paths_top50 %>%
   theme_bw() +
   geom_line() +
   scale_colour_manual('Season', values = SEASON_COLOURS)
+
+
+#Trying an alternative definition based on the peak of the phase (i.e week where peak is identified) -> Better for consistency with analysis
+
+DateWeek_key <- for_rain %>%
+  mutate(year_day = julian(dates, origin = as.Date("2016-01-01"))) %>%
+  mutate(week = ceiling(year_day/7)) %>%
+  distinct(week, dates)
+
+SeasInfo <- cyc.genes.tres %>%
+  filter(type == "sig") %>%
+  inner_join(DateWeek_key %>% 
+               rename(phase = "week"),
+             by = "phase") %>%
+  inner_join(lmo_id_date %>% distinct(dates, season),  by = "dates") %>%
+  select(Geneid, season)
+ 
+
+filtered_genes_and_paths_top50 %>%
+  group_by(Geneid) %>%
+  mutate(zscore = (tpm - mean(tpm))/ sd(tpm) ) %>%
+  ungroup() %>%
+  semi_join(cyc.genes.tres %>% filter(type == "sig"), by = "Geneid") %>%
+  inner_join(SeasInfo, by = "Geneid") %>%
+  ggplot(mapping = aes(x = dates, y = zscore, colour = season, group = Geneid)) +
+  theme_bw() +
+  geom_line() +
+  scale_colour_manual('Season', values = SEASON_COLOURS)
+
+ggsave("../results/RAIN_classification_seasons.png")
 ```
 
 ```{r}
@@ -450,14 +472,27 @@ filtered_genes_and_paths_top50 %>%
 #| tbl-cap: "Number of genes in each seasonal cluster."
 #| warning: false
 
-filtered_genes_and_paths_top50 %>%
-  inner_join(season_info, by = "Geneid") %>%
-  semi_join(cyc.genes.tres %>% filter(type == "sig"), by = "Geneid") %>%
-  distinct(Geneid, season) %>%
+#filtered_genes_and_paths_top50 %>%
+#  inner_join(season_info, by = "Geneid") %>%
+#  semi_join(cyc.genes.tres %>% filter(type == "sig"), by = "Geneid") %>%
+#  distinct(Geneid, season) %>%
+#  group_by(season) %>%
+#  tally() %>%
+#  ungroup() %>%
+#  arrange(desc(n))
+
+SeasInfo %>% 
   group_by(season) %>%
   tally() %>%
   ungroup() %>%
-  arrange(desc(n))
+  arrange(desc(n)) %>%
+  summarise(sum(n))
+
+SeasInfo %>% 
+  group_by(season) %>%
+  tally() %>%
+  ungroup() %>%
+  arrange(desc(n)) 
 ```
 
 ### COG-summary of RAIN Genes as opposed to non-RAIN genes
@@ -642,69 +677,69 @@ Genes of interest, representing litestyle-choiced and ecological strategies of a
 #Creating a reasonable colour palette for this misery
 
 pathway_colour_palette <- c(
-    "Antenna_proteins.apcA*"   = "#A6CEE3",
-    "Antenna_proteins.apcB*"   = "#1F78B4",
-    "Antenna_proteins.cpcA*"   = "#B2DF8A",
-    "Antenna_proteins.cpcB*" = "#33A02C",
-    "c_fixation.cbbL*" = "#A6CEE3",
+    "Antenna_proteins.apcA"   = "#A6CEE3",
+    "Antenna_proteins.apcB"   = "#1F78B4",
+    "Antenna_proteins.cpcA"   = "#B2DF8A",
+    "Antenna_proteins.cpcB" = "#33A02C",
+    "c_fixation.cbbL" = "#A6CEE3",
     "HeteroDiffGenes.hetR" = "#A6CEE3",
     "HeteroDiffGenes.ntcA" = "#1F78B4",
-    "n_fixation.nifD*" = "#A6CEE3",
-    "n_fixation.nifH*" = "#1F78B4",
+    "n_fixation.nifD" = "#A6CEE3",
+    "n_fixation.nifH" = "#1F78B4",
     "GasVesgenes.gvpC" = "#A6CEE3",
-    "GasVesgenes.gvpF*"= "#1F78B4",
-    "GasVesgenes.gvpG*" = "#CAB2D6",
+    "GasVesgenes.gvpF"= "#1F78B4",
+    "GasVesgenes.gvpG" = "#CAB2D6",
     "GasVesgenes.gvpJ" = "#6A3D9A",
-    "GasVesgenes.gvpK*" ="#B15928",
+    "GasVesgenes.gvpK" ="#B15928",
     "GasVesgenes.gvpN" = "#FB9A99",
-    "GasVesgenes.gvpW*" = "#B2DF8A",
-    "Phosphorus_scav_genes.pstA*" = "#A6CEE3",
-    "Phosphorus_scav_genes.pstB*" = "#1F78B4",
-    "Phosphorus_scav_genes.pstC*" = "#B2DF8A",
-    "Phosphorus_scav_genes.pstS*" = "#33A02C",
-    "PS1.psaA*" = "#A6CEE3",
-    "PS1.psaB*" = "#1F78B4",
+    "GasVesgenes.gvpW" = "#B2DF8A",
+    "Phosphorus_scav_genes.pstA" = "#A6CEE3",
+    "Phosphorus_scav_genes.pstB" = "#1F78B4",
+    "Phosphorus_scav_genes.pstC" = "#B2DF8A",
+    "Phosphorus_scav_genes.pstS" = "#33A02C",
+    "PS1.psaA" = "#A6CEE3",
+    "PS1.psaB" = "#1F78B4",
     "PS1.psaC" = "#CAB2D6",
     "PS1.psaD" = "#6A3D9A",
-    "PS1.psaE*" = "#FFFF99",
-    "PS1.psaF*" = "#B15928",
+    "PS1.psaE" = "#FFFF99",
+    "PS1.psaF" = "#B15928",
     "PS1.psaI" = "#FB9A99",
-    "PS1.psaJ*" = "#33A02C",
+    "PS1.psaJ" = "#33A02C",
     "PS1.psaK" = "#E31A1C",
-    "PS1.psaL*" = "#FDBF6F",
+    "PS1.psaL" = "#FDBF6F",
     "PS1.psaX" = "#B2DF8A",
-    "PS2.psbB*" = "#A6CEE3",
+    "PS2.psbB" = "#A6CEE3",
     "PS2.psbC" = "#1F78B4",
-    "PS2.psbD*" = "#B2DF8A",
+    "PS2.psbD" = "#B2DF8A",
     "PS2.psbE" = "#33A02C",
-    "PS2.psbF*" = "#FB9A99",
-    "SigFac.sigC*" = "#A6CEE3",
+    "PS2.psbF" = "#FB9A99",
+    "SigFac.sigC" = "#A6CEE3",
     "SigFac.sigE" = "#1F78B4",
     "SigFac.sigG" = "#B2DF8A",
     "Circadian.kaiC" = "#A6CEE3",
-    "Circadian.kaiB*" = "#1F78B4",
+    "Circadian.kaiB" = "#1F78B4",
     "Circadian.kaiA" = "#B2DF8A",
     "CobGenes.cbiA" ="#A6CEE3",
-    "CobGenes.cbiD*" ="#1F78B4",
+    "CobGenes.cbiD" ="#1F78B4",
     "CobGenes.cbiM"="#B2DF8A",
-    "CobGenes.cbiQ*"="#33A02C",
+    "CobGenes.cbiQ"="#33A02C",
     "CobGenes.cbiT" ="#FB9A99",
     "CobGenes.cbiX" ="#E31A1C",
     "CobGenes.cobI" ="#FDBF6F",
-    "CobGenes.cobJ*"="#FF7F00",
-    "CobGenes.cobO*" ="#CAB2D6",
-    "CobGenes.cobQ*"="#6A3D9A",
-    "CobGenes.cobT*"="#FFFF99",
-    "CobGenes.cobW*"="#B15928",
+    "CobGenes.cobJ"="#FF7F00",
+    "CobGenes.cobO" ="#CAB2D6",
+    "CobGenes.cobQ"="#6A3D9A",
+    "CobGenes.cobT"="#FFFF99",
+    "CobGenes.cobW"="#B15928",
     "FolGenes.folA" ="#A6CEE3",
     "FolGenes.folB" ="#1F78B4",
-    "FolGenes.folC*"="#B2DF8A",
-    "FolGenes.folD*" ="#33A02C",
+    "FolGenes.folC"="#B2DF8A",
+    "FolGenes.folD" ="#33A02C",
     "FolGenes.folE" ="#FB9A99",
     "FolGenes.folK"="#E31A1C",
     "FolGenes.FolP"= "#FDBF6F",
-    "GlutaGenes.gshA*" = "#A6CEE3",
-    "GlutaGenes.gshB*" = "#1F78B4"
+    "GlutaGenes.gshA" = "#A6CEE3",
+    "GlutaGenes.gshB" = "#1F78B4"
     
     
 )
@@ -753,8 +788,7 @@ SigInfo <- filtered_genes_and_paths_top50 %>%
   pull(Predicted_protein_name)
    
 
-
- filtered_genes_and_paths_top50 %>%
+hmm <- filtered_genes_and_paths_top50 %>%
   mutate(type = ifelse(
     Geneid %in% c(
       cyc.genes.tres %>% filter(type == "sig") %>% distinct(Geneid) %>% pull(Geneid)
@@ -792,10 +826,55 @@ SigInfo <- filtered_genes_and_paths_top50 %>%
                           TRUE ~ "Other")) %>%
   filter(Cats != "Other") %>%
    mutate(type = ifelse(Predicted_protein_name %in% SigInfo, paste0("Yes"), paste0("No"))) %>%
-  mutate(Predicted_protein_name = ifelse(Predicted_protein_name %in% SigInfo, paste0(Predicted_protein_name,"*"), paste0(Predicted_protein_name))) %>%
+ # mutate(Predicted_protein_name = ifelse(Predicted_protein_name %in% SigInfo, paste0(Predicted_protein_name,"*"), paste0(Predicted_protein_name))) %>%
+  mutate(Group = paste(Cats, Predicted_protein_name, sep = ".")) %>%
+  select(Geneid, dates, tpm) %>%
+  pivot_wider(values_from = tpm, names_from = Geneid, values_fill  = 0) %>%
+  pivot_longer(c(2:ncol(.)), names_to = "Geneid", values_to = "tpm")
+
+hmm %>%
+   mutate(type = ifelse(
+    Geneid %in% c(
+      cyc.genes.tres %>% filter(type == "sig") %>% distinct(Geneid) %>% pull(Geneid)
+      ), paste0("sig"), paste0("non-sig")
+    )) %>%
+  group_by(Geneid, dates) %>%
+  summarise(tpm = sum(tpm)) %>%
+  ungroup() %>%
+  left_join(eggnog_table %>% distinct(Predicted_protein_name, Geneid), by = "Geneid") %>%
+  mutate(Cats = case_when(Predicted_protein_name %in% PS2 ~ paste0(VecOfvecs2[1]),
+                          Predicted_protein_name %in% PS1 ~ paste0(VecOfvecs2[2]),
+                          Predicted_protein_name %in% Antenna_proteins ~ paste0(VecOfvecs2[3]),
+                          Predicted_protein_name %in% n_fixation ~ paste0(VecOfvecs2[4]),
+                          Predicted_protein_name %in% c_fixation ~ paste0(VecOfvecs2[5]),
+                          Predicted_protein_name %in% sunscreen_genes ~ paste0(VecOfvecs2[6]),
+                          Predicted_protein_name %in% Phosphorus_scav_genes ~ paste0(VecOfvecs2[7]),
+                          Predicted_protein_name %in% HeteroDiffGenes ~ paste0(VecOfvecs2[8]),
+                          #Predicted_protein_name %in% SigFac ~ paste0(VecOfvecs2[9]),
+                          Predicted_protein_name %in% GasVesgenes ~ paste0(VecOfvecs2[10]),
+                          Predicted_protein_name %in% Microcystin ~ paste0(VecOfvecs2[11]),
+                          Predicted_protein_name %in% Anabaenopeptilide ~ paste0(VecOfvecs2[12]),
+                          Predicted_protein_name %in% Anabaenopeptin ~ paste0(VecOfvecs2[13]),
+                          Predicted_protein_name %in% Anabaenolysin ~ paste0(VecOfvecs2[14]),
+                          Predicted_protein_name %in% Anacyclamide ~ paste0(VecOfvecs2[15]),
+                          Predicted_protein_name %in% Anatoxin_a ~ paste0(VecOfvecs2[16]),
+                          Predicted_protein_name %in% Hassallidin ~ paste0(VecOfvecs2[17]),
+                          Predicted_protein_name %in% Aeruginosin ~ paste0(VecOfvecs2[18]),
+                          Predicted_protein_name %in% Anabaenopeptin_Pseudospumigin_Microviridin ~ paste0(VecOfvecs2[19]),
+                          Predicted_protein_name %in% Geosmin ~ paste0(VecOfvecs2[20]),
+                          Predicted_protein_name %in% CylindrospermopsinGenes ~ paste0(VecOfvecs2[21]),
+                          Predicted_protein_name %in% Circadian ~ paste0(VecOfvecs2[22]),
+                          Predicted_protein_name %in% CobGenes ~ paste0(VecOfvecs2[23]),
+                          Predicted_protein_name %in% FolGenes ~ paste0(VecOfvecs2[24]),
+                          Predicted_protein_name %in% GlutaGenes ~ paste0(VecOfvecs2[25]),
+                          TRUE ~ "Other")) %>%
+  filter(Cats != "Other") %>%
+   mutate(type = ifelse(Predicted_protein_name %in% SigInfo, paste0("Yes"), paste0("No"))) %>%
+ # mutate(Predicted_protein_name = ifelse(Predicted_protein_name %in% SigInfo, paste0(Predicted_protein_name,"*"), paste0(Predicted_protein_name))) %>%
   mutate(Group = paste(Cats, Predicted_protein_name, sep = ".")) %>%
   ggplot(mapping = aes(x = dates, y = tpm, group = Geneid, colour = Group)) +
   geom_line(aes(linetype = fct_relevel(type, "No", after = Inf))) +
+  #geom_point() +
   facet_wrap(~ Cats, scales = "free_y") +
   theme_classic() +
   theme(
@@ -845,9 +924,9 @@ SigInfo <- filtered_genes_and_paths_top50 %>%
     fill = "grey"
     )
  
- ggsave("../results/EcoGenes.pdf", width = 39, height = 16, units = "cm")
+ ggsave("../results/EcoGenes.pdf",  width = 39, height = 29, units = "cm")
  
- ggsave("../results/EcoGenes.pdf",  width = 39, height = 39, units = "cm")
+ggsave("../results/EcoGenes.png",  width = 39, height = 29, units = "cm")
 ```
 
 ## Table with season info on the eco-genes
@@ -1081,8 +1160,6 @@ cor.test(genecorr[,1], genecorr[,2], method = "spearman", alternative = "two.sid
 
 ## More gene expression investigation focusing on seasons that are not summer
 ```{r}
-Inv <- season_info %>%
-    inner_join(eggnog_table %>% distinct(Geneid, Predicted_protein_name, KEGG_ko), by = "Geneid")
 
 #Inlcude geens based on their seasonal optima in winter, spring and autumn.
   #Extract and look at genes in these optima based on RAIN-figure and mean tpm expression
@@ -1178,17 +1255,16 @@ filtered_genes_and_paths_top50 %>%
     alpha = .37,
     fill = "grey"
     )
+
+
 ```
+
 ## Further selection of important genes in seasons other than summer
 
 The cobalamin gene cluster expressed genes which peaked in all seasons but summer, interestingly gene duplicates of the genes with different seasonal optima was observed.
 ```{r}
-#Keep Cobalamin, folate and Glutathione in Winter
-
-
-
-
-
+Inv <- SeasInfo %>%
+    inner_join(eggnog_table %>% distinct(Geneid, Predicted_protein_name, KEGG_ko), by = "Geneid")
 
 ```
 
