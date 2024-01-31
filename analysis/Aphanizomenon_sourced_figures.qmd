@@ -28,6 +28,7 @@ library(Hmisc)
 library(patchwork)
 library(ggtext)
 library(gridExtra)
+library(scales)
 ```
 
 ```{r}
@@ -49,7 +50,7 @@ SEASON_COLOURS = c("spring" = "#33A02C", "summer" = "#E31A1C",  "autumn" =  "#FF
   eggnog_names <- c("Geneid", "MAG", "contig", "Start", "End", "Strand", "Length", "seed_eggNOG_ortholog", "seed_ortholog_evalue", "seed_ortholog_score", "Predicted_taxonomic_group", "Predicted_protein_name", "Gene_Ontology_terms", "EC_number", "KEGG_ko", "KEGG_Pathway", "KEGG_Module", "KEGG_Reaction", "KEGG_rclass", "BRITE", "KEGG_TC", "CAZy", "BiGG Reaction", "tax_scope:eggNOG_taxonomic_level_used_for_annotation", "eggNOG_OGs", "bestOG", "COG_Functional_Category", "eggNOG_free_text_description", "sample", "counts")
   
   eggnog_table <- read_tsv("../data/eggnog_table_long.tsv.gz", col_types = cols(Start = col_integer(), End = col_integer(), Length = col_integer(), counts = col_integer(), X7 = col_character())) %>%
-                             separate(Chr, c("MAG", "contig"), sep ="_k", remove = TRUE)
+                             separate(Chr, c("MAG", "contig"), sep ="_k", remove = TRUE) 
   eggnog_table$sample <- sub('.non_rRNA.pe.bowtie2.q5', '', eggnog_table$sample)
    eggnog_table$sample <- sub('.ca.pesickle.pe.bowtie2.sorted.unmappedpairs.pe.bowtie2.q5', '', eggnog_table$sample) 
    eggnog_table$sample <- sub('.lane00[0-9].ca.pesickle.pe.bowtie2.q5', '', eggnog_table$sample) 
@@ -58,6 +59,9 @@ SEASON_COLOURS = c("spring" = "#33A02C", "summer" = "#E31A1C",  "autumn" =  "#FF
    eggnog_table$sample <- sub(".sorted.bam", "", eggnog_table$sample)
    
    colnames(eggnog_table) <- eggnog_names
+   
+   eggnog_table <- eggnog_table %>%
+      mutate(Predicted_protein_name = ifelse(Geneid %in% c("OFJACKGI_02436","OFJACKGI_00660"), paste0("psbA"),paste0(Predicted_protein_name))) # These two names were annotated as pufM, as this is unreasonable, they were compared against the prokka annotation which then was used to verify that they are instead psbA
    
    # Loading date file/sample key
    lmo_id_date <- read_tsv("../data/lmo_id_date.tsv.gz") %>%
@@ -79,7 +83,7 @@ SEASON_COLOURS = c("spring" = "#33A02C", "summer" = "#E31A1C",  "autumn" =  "#FF
                                     ifelse(grepl("*SRR*", MAG), "askö", "LMO"))))
   
   # Orf-file incluing only expressed genes
-cds_table<- read_tsv("../data/cds_counts_filtered.tsv")
+#cds_table<- read_tsv("../data/cds_counts_filtered.tsv")
 
 COG_cats <- read_tsv("../data/COG_categories.tsv") %>%
   rename(COG_Functional_Category = "COG_category")
@@ -97,6 +101,29 @@ all_annotations <- read_tsv("../data/eggnog_annotated.tsv.gz") %>%
 sample_key <- read_csv("../data/samplesheet.csv") %>%
   mutate(sampleDate = str_extract(fastq_1, "P[0-9]*_[0-9]*")) %>%
   select(sample, sampleDate)
+
+# Reading in sample translation for the LMO-numbers (used to join cds_table with sample_ID file)
+samplesheet <- read_csv("../data/samplesheet.csv") %>%
+  rename(LMO_ID = "sample", sample = 2) %>%
+  select(-3) %>%
+  mutate(sample = gsub("./samples/","", sample),
+         sample = gsub(".r1.fastq.gz","", sample),
+         sample = gsub(".lane00[0-9]","", sample)
+         )
+
+# The new file
+cds_table <- read_tsv("../data/alneberg_bacls.fc.CDS.tsv.gz", comment = "#") %>%
+  separate(Chr, c("MAG", "contig"), sep = "_k") %>% #extracting MAG name
+  filter(MAG == "P1994_122_bin236") %>% #Selecting relevant MAG
+  pivot_longer(cols = 8:ncol(.), names_to = "sample") %>% #Long format
+  mutate(sample = gsub(".bam","", sample)) %>% #Removing .bam for joining in with sample file later
+  rename(LMO_ID = "sample",
+         counts = "value") %>% #Matching names for samplesheet
+  inner_join(samplesheet, by = "LMO_ID") %>%
+  select(-LMO_ID)
+
+# The new overall stats
+new_reads_stats <- read_tsv("../data/megahit.prokka.overall_stats.tsv.gz")
 
 #Reading in the total reads from the assembly
 assembly_reads <- fread("../data/megahit.prokka.counts.tsv.gz", sep = "\t") %>%
@@ -120,6 +147,21 @@ phytoCount <- read_tsv("../data/phyto_counts_USE_20210614.tsv") %>%
 ```
 
 ```{r}
+#Total number of orfs
+
+cds_table %>%
+  distinct(Geneid)
+
+#Number of orfs expressed
+
+cds_table %>%
+  filter(counts > 0) %>%
+  distinct(Geneid)
+
+```
+
+
+```{r}
 #| label: filtering-low-abundant-dates
 #| warning: false
 #| cache: true
@@ -135,8 +177,7 @@ genes_and_paths_top50 <- cds_table %>%
   mutate(t = counts/Length) %>%
   mutate(tpm = t/sum(t)*1e6) %>%
   ungroup() %>%
-  dplyr::select(-t) %>%
-  filter(MAG == "P1994_122_bin236") 
+  dplyr::select(-t) 
  
 cds_table_filtered <- cds_table %>%  inner_join(lmo_id_date, by = "sample") %>% dplyr::filter(filter_frac == "unfiltered") %>% group_by(dates, MAG, Geneid) %>% summarise(counts = mean(counts)) %>% ungroup() %>% group_by(MAG, dates) %>% summarise(counts = sum(counts)) %>% ungroup() %>% dplyr::filter(counts >= 3000)
 
@@ -484,7 +525,7 @@ df <- rain::rain(mag_time_points, deltat = 1, period = 52, nr.series = 1 , measu
 #Calulating the coefficient of variation to use as a treshold for plotting.
 
 CV_info <- filtered_genes_and_paths_top50 %>%
-  inner_join(season_info, by = "Geneid") %>%
+  #inner_join(season_info, by = "Geneid") %>%
   group_by(Geneid) %>%
   summarise(CV = (sd(tpm)/mean(tpm)) *100) %>%
   ungroup() 
@@ -531,6 +572,7 @@ season_info <- filtered_genes_and_paths_top50 %>%
   pivot_wider(names_from = Geneid, values_from = tpm, values_fill = 0) %>%
   pivot_longer(cols =c(2:ncol(.)) , names_to = "Geneid", values_to = "tpm") %>%
   inner_join(lmo_id_date %>% distinct(dates, season), by = "dates") %>%
+  semi_join(cyc.genes.tres %>% filter(type == "sig"), by = "Geneid") %>%
   group_by(Geneid, season) %>%
   summarise(tpm = mean(tpm)) %>%
   ungroup() %>%
@@ -567,13 +609,12 @@ SeasInfo <- cyc.genes.tres %>%
   inner_join(lmo_id_date %>% distinct(dates, season),  by = "dates") %>%
   select(Geneid, season)
  
-
 filtered_genes_and_paths_top50 %>%
   group_by(Geneid) %>%
   mutate(zscore = (tpm - mean(tpm))/ sd(tpm) ) %>%
   ungroup() %>%
   semi_join(cyc.genes.tres %>% filter(type == "sig"), by = "Geneid") %>%
-  inner_join(SeasInfo, by = "Geneid") %>%
+  inner_join(season_info, by = "Geneid") %>%
   ggplot(mapping = aes(x = dates, y = zscore, colour = season, group = Geneid)) +
   theme_bw() +
   geom_line() +
@@ -590,7 +631,7 @@ filtered_genes_and_paths_top50 %>%
         legend.position = "bottom"
   )
 
-ggsave("../results/RAIN_classification_seasons.pdf")
+ggsave("../results/RAIN_classification_seasons.png")
 ```
 
 ```{r}
@@ -615,6 +656,19 @@ SeasInfo %>%
   summarise(sum(n))
 
 SeasInfo %>% 
+  group_by(season) %>%
+  tally() %>%
+  ungroup() %>%
+  arrange(desc(n)) 
+
+season_info %>% 
+  group_by(season) %>%
+  tally() %>%
+  ungroup() %>%
+  arrange(desc(n)) %>%
+  summarise(sum(n))
+
+season_info %>% 
   group_by(season) %>%
   tally() %>%
   ungroup() %>%
@@ -688,7 +742,7 @@ scale25 <- c(
 
 filtered_genes_and_paths_top50 %>%
   semi_join(cyc.genes.tres %>% filter(type == "sig"), by = "Geneid") %>%
-  inner_join(SeasInfo, by = "Geneid") %>%
+  inner_join(season_info, by = "Geneid") %>%
   inner_join(eggnog_table %>%
                distinct(Geneid, COG_Functional_Category,
                         by = "Geneid")) %>%
@@ -760,9 +814,9 @@ ggsave("../results/PCA_metaT_COG.pdf", width = 34, height = 24, units = "cm")
 
 ## Identifying initeresting genes in the winter cluster 
 ```{r}
-Seasonal_infos<-  filtered_genes_and_paths_top50 %>%
+Seasonal_infos <-  filtered_genes_and_paths_top50 %>%
   semi_join(cyc.genes.tres %>% filter(type == "sig"), by = "Geneid") %>%
-  inner_join(SeasInfo, by = "Geneid") %>%
+  inner_join(season_info, by = "Geneid") %>%
   inner_join(eggnog_table %>%
                distinct(Geneid, COG_Functional_Category, Predicted_protein_name,eggNOG_free_text_description ),
                         by = "Geneid") %>%
@@ -931,6 +985,7 @@ ggsave("../results/KEGG_level_2.png")
  Antenna_proteins <- c("apcA","apcB", "cpcA", "cpcB", "cpeA","cpeB", "cpeC" , "cpeD", "cpeE", "cpeR", "cpeS", "cpeT", "cpeU", "cpeY", "cpeZ")
  
 n_fixation <- c("nifH","nifD") # (The two usually expressed genes, nifH probably only relevant)
+NitMet <- c("nifH","nifD","amtB","urtA")
 c_fixation <- c("rbcL", "cbbL", "cbbM") #(From KEGG pathway, and oown knowledge) "RubisCo""M00165". 
 sunscreen_genes <-  c("scyA","scyB","scyC","scyD","scyE") #scyD is not part of core cassette. (Pichel et al. 2019)
 #"ribosomal genes" - "" # Did not find any sunscreen genes
@@ -970,12 +1025,12 @@ OxiStress <- c("gshA","gshB","rbr","dnaJ","dnaJ3","grpE","sodB", "fur")
 
 #Sulfur genes
 
-Sulf <- c("sufE","sufS")
+Sulf <- c("sufB","sufS")
   
   #List of genes of interest, also see Ericks list of interesting genes.
-VecOfvecs1 <- c(PS2, PS1, Antenna_proteins, n_fixation, c_fixation, sunscreen_genes, Phosphorus_scav_genes, HeteroDiffGenes, SigFac, GasVesgenes,Microcystin, Anabaenopeptilide, Anabaenopeptin, Anabaenolysin, Anacyclamide, Anatoxin_a, Hassallidin, Aeruginosin, Anabaenopeptin_Pseudospumigin_Microviridin, Geosmin, CylindrospermopsinGenes, Circadian, CobGenes, FolGenes, OxiStress)
+VecOfvecs1 <- c(PS2, PS1, Antenna_proteins, NitMet, c_fixation, sunscreen_genes, Phosphorus_scav_genes, HeteroDiffGenes, SigFac, GasVesgenes,Microcystin, Anabaenopeptilide, Anabaenopeptin, Anabaenolysin, Anacyclamide, Anatoxin_a, Hassallidin, Aeruginosin, Anabaenopeptin_Pseudospumigin_Microviridin, Geosmin, CylindrospermopsinGenes, Circadian, CobGenes, FolGenes, OxiStress, Sulf)
 
-VecOfvecs2 <- c("PS2", "PS1", "Antenna_proteins", "n_fixation", "c_fixation", "sunscreen_genes", "Phosphorus_scav_genes", "HeteroDiffGenes", "SigFac", "GasVesgenes", "Microcystin", "Anabaenopeptilide", "Anabaenopeptin", "Anabaenolysin", "Anacyclamide", "Anatoxin_a", "Hassallidin", "Aeruginosin", "Anabaenopeptin_Pseudospumigin_Microviridin", "Geosmin", "CylindrospermopsinGenes","Circadian","CobGenes","FolGenes","OxiStress")
+VecOfvecs2 <- c("PS2", "PS1", "Antenna_proteins", "NitMet", "c_fixation", "sunscreen_genes", "Phosphorus_scav_genes", "HeteroDiffGenes", "SigFac", "GasVesgenes", "Microcystin", "Anabaenopeptilide", "Anabaenopeptin", "Anabaenolysin", "Anacyclamide", "Anatoxin_a", "Hassallidin", "Aeruginosin", "Anabaenopeptin_Pseudospumigin_Microviridin", "Geosmin", "CylindrospermopsinGenes","Circadian","CobGenes","FolGenes","OxiStress", "Sulf")
 ```
 
 ```{r}
@@ -997,7 +1052,7 @@ SeaEcoGen <- filtered_genes_and_paths_top50 %>%
   mutate(Cats = case_when(Predicted_protein_name %in% PS2 ~ paste0(VecOfvecs2[1]),
                           Predicted_protein_name %in% PS1 ~ paste0(VecOfvecs2[2]),
                           Predicted_protein_name %in% Antenna_proteins ~ paste0(VecOfvecs2[3]),
-                          Predicted_protein_name %in% n_fixation ~ paste0(VecOfvecs2[4]),
+                          Predicted_protein_name %in% NitMet ~ paste0(VecOfvecs2[4]),
                           Predicted_protein_name %in% c_fixation ~ paste0(VecOfvecs2[5]),
                           Predicted_protein_name %in% sunscreen_genes ~ paste0(VecOfvecs2[6]),
                           Predicted_protein_name %in% Phosphorus_scav_genes ~ paste0(VecOfvecs2[7]),
@@ -1019,9 +1074,9 @@ SeaEcoGen <- filtered_genes_and_paths_top50 %>%
                           Predicted_protein_name %in% CobGenes ~ paste0(VecOfvecs2[23]),
                           Predicted_protein_name %in% FolGenes ~ paste0(VecOfvecs2[24]),
                           Predicted_protein_name %in% OxiStress ~ paste0(VecOfvecs2[25]),
+                          Predicted_protein_name %in% Sulf ~ paste0(VecOfvecs2[26]),
                           TRUE ~ "Other")) %>%
   distinct(Predicted_protein_name,Cats, season)
-
 ```
 
 Genes of interest, representing litestyle-choiced and ecological strategies of aphanizomenon were selected based on literature, and included photosystem genes, antenna-proteins, heterocyst differentiation genes and their sigma factors, N and C fixation genes, gas vesicle genes, P-scavenging genes @fig-GenevecPlot. Toxin genes were included in the search but not found. The heterocyst genes appear to be expressed before the N-fixation gene top expression.
@@ -1120,7 +1175,7 @@ SigInfo <- filtered_genes_and_paths_top50 %>%
     mutate(Cats = case_when(Predicted_protein_name %in% PS2 ~ paste0(VecOfvecs2[1]),
                           Predicted_protein_name %in% PS1 ~ paste0(VecOfvecs2[2]),
                           Predicted_protein_name %in% Antenna_proteins ~ paste0(VecOfvecs2[3]),
-                          Predicted_protein_name %in% n_fixation ~ paste0(VecOfvecs2[4]),
+                          Predicted_protein_name %in% NitMet ~ paste0(VecOfvecs2[4]),
                           Predicted_protein_name %in% c_fixation ~ paste0(VecOfvecs2[5]),
                           Predicted_protein_name %in% sunscreen_genes ~ paste0(VecOfvecs2[6]),
                           Predicted_protein_name %in% Phosphorus_scav_genes ~ paste0(VecOfvecs2[7]),
@@ -1142,6 +1197,7 @@ SigInfo <- filtered_genes_and_paths_top50 %>%
                           Predicted_protein_name %in% CobGenes ~ paste0(VecOfvecs2[23]),
                           Predicted_protein_name %in% FolGenes ~ paste0(VecOfvecs2[24]),
                           Predicted_protein_name %in% OxiStress ~ paste0(VecOfvecs2[25]),
+                           Predicted_protein_name %in% Sulf ~ paste0(VecOfvecs2[26]),
                           TRUE ~ "Other")) %>%
     filter(Cats != "Other") %>%
    distinct(Predicted_protein_name, type) %>%
@@ -1157,7 +1213,7 @@ hmm <- filtered_genes_and_paths_top50 %>%
   mutate(Cats = case_when(Predicted_protein_name %in% PS2 ~ paste0(VecOfvecs2[1]),
                           Predicted_protein_name %in% PS1 ~ paste0(VecOfvecs2[2]),
                           Predicted_protein_name %in% Antenna_proteins ~ paste0(VecOfvecs2[3]),
-                          Predicted_protein_name %in% n_fixation ~ paste0(VecOfvecs2[4]),
+                          Predicted_protein_name %in% NitMet ~ paste0(VecOfvecs2[4]),
                           Predicted_protein_name %in% c_fixation ~ paste0(VecOfvecs2[5]),
                           Predicted_protein_name %in% sunscreen_genes ~ paste0(VecOfvecs2[6]),
                           Predicted_protein_name %in% Phosphorus_scav_genes ~ paste0(VecOfvecs2[7]),
@@ -1179,6 +1235,7 @@ hmm <- filtered_genes_and_paths_top50 %>%
                           Predicted_protein_name %in% CobGenes ~ paste0(VecOfvecs2[23]),
                           Predicted_protein_name %in% FolGenes ~ paste0(VecOfvecs2[24]),
                           Predicted_protein_name %in% OxiStress ~ paste0(VecOfvecs2[25]),
+                           Predicted_protein_name %in% Sulf ~ paste0(VecOfvecs2[26]),
                           TRUE ~ "Other")) %>%
   filter(Cats != "Other") %>%
    mutate(type = ifelse(Predicted_protein_name %in% SigInfo, paste0("Yes"), paste0("No"))) %>%
@@ -1187,7 +1244,6 @@ hmm <- filtered_genes_and_paths_top50 %>%
   select(Geneid, dates, tpm) %>%
   pivot_wider(values_from = tpm, names_from = Geneid, values_fill  = 0) %>%
   pivot_longer(c(2:ncol(.)), names_to = "Geneid", values_to = "tpm")
-
 ```
 
 ## Alternative plotting with only gene names in individual plots
@@ -1200,7 +1256,7 @@ trial <- hmm %>%
   mutate(Cats = case_when(Predicted_protein_name %in% PS2 ~ paste0(VecOfvecs2[1]),
                           Predicted_protein_name %in% PS1 ~ paste0(VecOfvecs2[2]),
                           Predicted_protein_name %in% Antenna_proteins ~ paste0(VecOfvecs2[3]),
-                          Predicted_protein_name %in% n_fixation ~ paste0(VecOfvecs2[4]),
+                          Predicted_protein_name %in% NitMet ~ paste0(VecOfvecs2[4]),
                           Predicted_protein_name %in% c_fixation ~ paste0(VecOfvecs2[5]),
                           Predicted_protein_name %in% sunscreen_genes ~ paste0(VecOfvecs2[6]),
                           Predicted_protein_name %in% Phosphorus_scav_genes ~ paste0(VecOfvecs2[7]),
@@ -1222,6 +1278,7 @@ trial <- hmm %>%
                           Predicted_protein_name %in% CobGenes ~ paste0(VecOfvecs2[23]),
                           Predicted_protein_name %in% FolGenes ~ paste0(VecOfvecs2[24]),
                           Predicted_protein_name %in% OxiStress ~ paste0(VecOfvecs2[25]),
+                           Predicted_protein_name %in% Sulf ~ paste0(VecOfvecs2[26]),
                           TRUE ~ "Other")) %>%
   filter(Cats != "Other") %>%
    mutate(type = ifelse(
@@ -1232,29 +1289,33 @@ trial <- hmm %>%
   mutate(Predicted_protein_name = paste0("*",Predicted_protein_name,"*")) %>%
   mutate(Group = paste0("*",Cats,"*"))  %>%
   mutate(presentable_names = case_when(Cats == "Antenna_proteins" ~ "Antenna proteins",
-                                       Cats == "CobGenes" ~ "Cobalamin genes",
+                                       Cats == "CobGenes" ~ "Cobalamin metabolism",
                                        Cats == "OxiStress" ~ "Oxidative stress",
-                                       Cats == "n_fixation" ~ "N<sub>2</sub>-fixation",
+                                       Cats == "NitMet" ~ "Nitrogen metabolism",
+                                       Cats == "PS1" ~ "Photosystem I",
+                                       Cats == "PS2" ~ "Photosystem II",
                                        Cats == "FolGenes" ~ "Folate genes",
                                        Cats == "HeteroDiffGenes" ~ "Heterocyst differentiation",
                                        Cats == "GasVesgenes" ~ "Gas vesicles",
                                        Cats == "c_fixation" ~ "Carbon fixation",
                                        Cats == "Circadian" ~ "Circadian rhythm",
                                        Cats == "Phosphorus_scav_genes" ~ "Phosphate transport",
+                                       Cats == "Sulf" ~ "Iron-Sulfur biosynthesis",
                                        TRUE~ paste0(Cats)
                                        )) %>%
   mutate(presentable_names = factor(presentable_names, levels = c("Antenna proteins",
                                                                   "Carbon fixation",
-                                                                  "N<sub>2</sub>-fixation",
-                                                                  "PS1",
-                                                                  "PS2",
+                                                                  "Nitrogen metabolism",
+                                                                  "Photosystem I",
+                                                                  "Photosystem II",
                                                                   "Heterocyst differentiation",
                                                                   "Phosphate transport",
                                                                   "Oxidative stress",
-                                                                  "Cobalamin genes",
+                                                                  "Cobalamin metabolism",
                                                                   "Circadian rhythm",
                                                                   "Gas vesicles",
-                                                                  "Folate genes"
+                                                                  #"Folate genes",
+                                                                  "Iron-Sulfur biosynthesis"
                                                                   
                                                                   
                                                                   )))
@@ -1293,46 +1354,46 @@ trial %>%
   arrange(desc(tpm))
 ```
 
-## Identifying other antioxidant genes in the winter-cluster
-```{r}
-
-```
-
 
 ```{r}
 
+trial1 <- trial 
+
+#  mutate(Predicted_protein_name = as.factor(Predicted_protein_name)) %>%
+  # filter(!Predicted_protein_name %in% c("*psbB*","*psbD*","*psbE*")) 
+  
 
 scientific <- function(x){
     ifelse(x==0, "0", parse(text=gsub("[+]", "", gsub("e", "%*%10^", scientific_format()(x)))))
 }
 
-out <- by(data = trial, INDICES = trial$presentable_names, FUN = function(m) {
+out <- by(data = trial1, INDICES = trial1$presentable_names, FUN = function(m) {
       m <- droplevels(m)
       m <- ggplot(m, aes(dates, tpm, group=Geneid, colour = Predicted_protein_name)) + 
-       geom_line(aes(linetype = type )) +
+       geom_line(aes()) +
         theme_classic() +
         theme(
         axis.title.x = element_blank(),
-        axis.text.x = element_text(size = 9, hjust = 1, angle = 60, colour = "black"),
-        axis.text.y = element_text(size = 9, colour = "black"),
+        axis.text.x = element_text(size =7, hjust = 1, angle = 60, colour = "black"),
+        axis.text.y = element_text(size = 7, colour = "black"),
         legend.title = element_blank(),
-        legend.text = element_markdown(size = 9),
+        legend.text = element_markdown(size = 7),
         legend.key.size = unit(0.3, 'cm'),
         #plot.margin = margin(t = 1, r = 1, b = 0, l = 1, "lines"),
-        plot.margin=unit(c(0.05,0.05,0.1,-0.48), "cm"),
+        plot.margin=unit(c(0.05,0.05,0.1,-0.46), "cm"),
         legend.position = "bottom",
         legend.box.spacing = unit(0, "pt"),
         legend.margin=margin(0,0,0,0),
         legend.spacing.x = unit(0.01, 'cm'),
         strip.placement = "outside",
-        strip.text = element_markdown(size = 9, colour = "black"),
+        strip.text = element_markdown(size = 7, colour = "black"),
         strip.background = element_blank()
         #legend.box.margin=margin(10,10,10,10)
     )  +
-        scale_colour_manual('Group', values = GEOM_COL_COLOURS) +
+        scale_colour_manual('Group', values = GEOM_COL_COLOURS, drop = F) +
         scale_x_date(date_breaks = "2 months", date_labels = "%b",limits = as.Date(c('2016-03-01','2017-12-12'))) +
-        scale_linetype_manual('Seasonal', values = c(1,2), guide = "none") +
-       # scale_y_continuous(label=scientific, breaks = pretty_breaks()) +
+        scale_linetype_manual('Seasonal', values = c(1,2), guide = "none", drop = F) +
+       scale_y_continuous(label=scientific) +
         ylab("") +
         facet_wrap(~ presentable_names) +
   annotate("rect",
@@ -1366,16 +1427,115 @@ out <- by(data = trial, INDICES = trial$presentable_names, FUN = function(m) {
     ymax = Inf,
     alpha = .37,
     fill = "grey"
-    )
+    ) 
   
    })
 
 # If you want to supply the parameters to grid.arrange
 plotobj <- do.call(grid.arrange, c(out, ncol=3))
 
-ggplot2::ggsave("../results/EcoGenesTrial.pdf", plotobj, height = 18, width = 18, units = "cm")
-ggplot2::ggsave("../results/EcoGenesTrial.png", plotobj, height = 18, width = 18, units = "cm")
+
+ggplot2::ggsave("../results/EcoGenesPS2a.pdf", plotobj, height = 18, width = 18, units = "cm")
+ggplot2::ggsave("../results/EcoGenesPS2a.png", plotobj, height = 18, width = 18, units = "cm")
 ```
+
+#Secondary plot for merging scales
+
+```{r}
+trial2 <- trial %>%
+   filter(Predicted_protein_name %in% c("*psbB*","*psbD*","*psbE*"))
+
+out <- by(data = trial2, INDICES = trial2$presentable_names, FUN = function(m) {
+      m <- droplevels(m)
+      m <- ggplot(m, aes(dates, tpm, group=Geneid, colour = Predicted_protein_name)) + 
+       geom_line(aes()) +
+        theme_classic() +
+        theme(
+        axis.title.x = element_blank(),
+        #axis.text.x = element_text(size =7, hjust = 1, angle = 60, colour = "black"),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 7, colour = "black"),
+        #axis.text.y = element_blank(),
+        axis.ticks = element_blank(),
+        legend.title = element_blank(),
+        #legend.text = element_markdown(size = 7),
+        legend.text = element_blank(),
+        legend.key.size = unit(0.3, 'cm'),
+        #plot.margin = margin(t = 1, r = 1, b = 0, l = 1, "lines"),
+        plot.margin=unit(c(0.0,0.0,0,0), "cm"),
+        legend.position = "none",
+        legend.box.spacing = unit(0, "pt"),
+        legend.margin=margin(0,0,0,0),
+        legend.spacing.x = unit(0.01, 'cm'),
+        strip.placement = "outside",
+       # strip.text = element_markdown(size = 7, colour = "black"),
+       strip.text = element_blank(),
+        strip.background = element_blank()
+        #legend.box.margin=margin(10,10,10,10)
+    )  +
+        scale_colour_manual('Group', values = GEOM_COL_COLOURS[-1]) +
+        scale_x_date(date_breaks = "2 months", date_labels = "%b",limits = as.Date(c('2016-03-01','2017-12-12'))) +
+        scale_linetype_manual('Seasonal', values = c(1,2), guide = "none") +
+       scale_y_continuous(label=scientific, position = "right") +
+        ylab("") +
+        facet_wrap(~ presentable_names) +
+  annotate("rect",
+    xmin = as.Date.character("2016-03-01"),
+    xmax = as.Date.character("2016-05-31"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .37,
+    fill = "grey"
+    ) +
+  annotate("rect",
+    xmin = as.Date.character("2016-09-01"),
+    xmax = as.Date.character("2016-11-30"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .37,
+    fill = "grey"
+    ) +
+    annotate("rect",
+    xmin = as.Date.character("2017-03-01"),
+    xmax = as.Date.character("2017-05-31"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .37,
+    fill = "grey"
+    ) +
+     annotate("rect",
+    xmin = as.Date.character("2017-09-01"),
+    xmax = as.Date.character("2017-11-30"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .37,
+    fill = "grey"
+    ) 
+  
+   })
+
+
+# If you want to supply the parameters to grid.arrange
+inset <- do.call(grid.arrange, c(out, ncol=3))
+
+ggplotify::as.ggplot(plotobj) +
+ inset_element(ggplotify::as.ggplot(inset),0.225, 0.54, 0.71, 0.77, ignore_tag = TRUE, clip = FALSE)
+ggplot2::ggsave("../results/EcoGenes_combined.pdf", height = 18, width = 18, units = "cm")
+ggplot2::ggsave("../results/EcoGenes_combined.png", height = 18, width = 18, units = "cm")
+                  
+
+
+ggplot2::ggsave("../results/EcoGenes_combined.pdf", plotobj, height = 18, width = 18, units = "cm")
+ggplot2::ggsave("../results/EcoGenes_combined.png", plotobj, height = 18, width = 18, units = "cm")
+
+```
+# Trying inset to dedal with the difference in data
+
+```{r}
+
+```
+
+
 
 ## Table with season info on the eco-genes
 
@@ -1663,8 +1823,8 @@ filtered_genes_and_paths_top50 %>%
                           #Predicted_protein_name %in% Glutamate ~ "Glutamate",
                          # Predicted_protein_name %in% FolGenes ~ "Folate",
                          # Predicted_protein_name %in% CobGenes ~ "Cobalamin",
-                          Predicted_protein_name %in% Urease ~ "Urease",
-                          Predicted_protein_name %in% UreaTran ~ "Urea transport",
+                          Predicted_protein_name %in% NitMet ~ "Nitrogen metabolism",
+                          #Predicted_protein_name %in% UreaTran ~ "Urea transport",
                           #Predicted_protein_name %in% RibGenes ~ "Riboflavin",
                           TRUE ~ "Other")) %>%
   filter(Cats != "Other") %>%
@@ -1719,8 +1879,79 @@ filtered_genes_and_paths_top50 %>%
     alpha = .37,
     fill = "grey"
     )
+```
 
+```{r}
 
+#Inspection of autumn cluster
+
+filtered_genes_and_paths_top50 %>%
+  group_by(Geneid, dates) %>%
+  summarise(tpm = sum(tpm)) %>%
+  ungroup() %>%
+  left_join(eggnog_table %>% distinct(Predicted_protein_name, Geneid), by = "Geneid") %>%
+  filter(Geneid %in% c(Seasonal_infos %>% filter(season == "Autumn") %>% pull(Geneid))) %>%
+ # mutate(Cats = case_when(#Predicted_protein_name %in% GlutaGenes ~ "Glutathione",
+                          #Predicted_protein_name %in% SulfGenes ~ "Sulfur",
+                          #Predicted_protein_name %in% Glutamate ~ "Glutamate",
+                         # Predicted_protein_name %in% FolGenes ~ "Folate",
+                         # Predicted_protein_name %in% CobGenes ~ "Cobalamin",
+                       #   Predicted_protein_name %in% Urease ~ "Urease",
+                       #   Predicted_protein_name %in% UreaTran ~ "Urea transport",
+                          #Predicted_protein_name %in% RibGenes ~ "Riboflavin",
+                       #   TRUE ~ "Other")) %>%
+ # filter(Cats != "Other") %>%
+ # mutate(Predicted_protein_name = ifelse(Predicted_protein_name %in% SigInfo, paste0(Predicted_protein_name,"*"), paste0(Predicted_protein_name))) %>%
+ # mutate(Group = paste(Cats, Predicted_protein_name, sep = ".")) %>%
+  ggplot(mapping = aes(x = dates, y = tpm, group = Geneid, colour = Predicted_protein_name)) +
+  geom_line() +
+ # facet_wrap(~ Cats, scales = "free_y") +
+  theme_classic() +
+  theme(
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 9),
+        axis.text.y = element_text(size = 9),
+        strip.placement = "outside",
+        strip.text = element_text(size = 9),
+        plot.margin = margin(t = 1, r = 1, b = 0, l = 1, "lines"),
+        legend.position = "right",
+        legend.text = element_text(size = 9)
+    ) +
+ # scale_colour_manual('Gene', values = GEOM_COL_COLOURS) +
+ # guides(colour=guide_legend(ncol=2,byrow=FALSE)) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  annotate("rect",
+    xmin = as.Date.character("2016-03-01"),
+    xmax = as.Date.character("2016-05-31"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .37,
+    fill = "grey"
+    ) +
+  annotate("rect",
+    xmin = as.Date.character("2016-09-01"),
+    xmax = as.Date.character("2016-11-30"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .37,
+    fill = "grey"
+    ) +
+    annotate("rect",
+    xmin = as.Date.character("2017-03-01"),
+    xmax = as.Date.character("2017-05-31"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .37,
+    fill = "grey"
+    ) +
+     annotate("rect",
+    xmin = as.Date.character("2017-09-01"),
+    xmax = as.Date.character("2017-11-30"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .37,
+    fill = "grey"
+    )
 ```
 
 ## Further selection of important genes in seasons other than summer
