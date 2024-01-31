@@ -105,13 +105,14 @@ phytoCount <- read_tsv("../data/phyto_counts_USE_20210614.tsv") %>%
 
 lmo_metadata <- read_tsv("../data/LMO_metadata1.tsv.gz", col_types = cols(.default = col_number(), Chla_Average = col_number(), Date = col_datetime())) %>%
 rename(dates = "Date")
-
 ```
 
 ## Creating a map of the LMO station
 
 ```{r}
 #Reading in country maps downloaded from https://www.diva-gis.org/gdata
+
+#Trying 3152
 
 Finlandia <- read_sf("../data/MapAreas/FIN_adm/FIN_adm0.shp") %>%
   st_transform(3152) # Using EPSG 3152 system coordinates
@@ -129,7 +130,9 @@ Germany <- read_sf("../data/MapAreas/DEU_adm/DEU_adm0.shp") %>%
   st_transform(3152)
 Denmark <- read_sf("../data/MapAreas/DNK_adm/DNK_adm0.shp") %>%
   st_transform(3152)
-Russia <- read_sf("../data/MapAreas/RUS_adm/RUS_adm0.shp") %>%
+Russia <- read_sf("../data/MapAreas/RUS_adm/RUS_adm1.shp") %>%
+  st_transform(3152)
+Belarus <- read_sf("../data/MapAreas/BLR_adm/BLR_adm0.shp") %>%
   st_transform(3152)
 
 #To convert between coordinate systems I used https://epsg.io/
@@ -144,15 +147,71 @@ ggplot() + # x is longitude, y is latitude
   geom_sf(data = Germany, colour = "black",fill = "white", lwd = 0.08) +
   geom_sf(data = Denmark, colour = "black",fill = "white", lwd = 0.08) +
   geom_sf(data = Russia, colour = "black",fill = "white", lwd = 0.08) +
+  geom_sf(data = Belarus, colour = "black",fill = "white", lwd = 0.08 ) +
   ggspatial::annotation_scale(location = "br") +
     theme(panel.grid = element_blank(),
           panel.background = element_blank()) +
  # lims(#x = c()
       # = c(324612.719680, -281620.628068)
  #) +
+  coord_sf(xlim = c(-137709.901354, 1007990.155279), 
+           ylim = c(655474.059965 , -596810.880910),
+           crs = st_crs(3152), expand = FALSE) +
   annotate("rect", xmin = 54499.033889 - 10000, xmax = 54499.033889 + 10000, ymin = -185279.558525 - 10000, ymax = -185279.558525 + 10000, fill = "black") 
 
+
 ggsave("../results/LMO_map.pdf")
+
+#Trying a different projection model
+
+Finlandia <- read_sf("../data/MapAreas/FIN_adm/FIN_adm0.shp") %>%
+  st_transform(25884) # Using EPSG 25884 system coordinates
+Sweden <- read_sf("../data/MapAreas/SWE_adm/SWE_adm0.shp") %>%
+  st_transform(25884) 
+Estonia <- read_sf("../data/MapAreas/EST_adm/EST_adm0.shp") %>%
+  st_transform(25884)
+Latvia <- read_sf("../data/MapAreas/LVA_adm/LVA_adm0.shp") %>%
+  st_transform(25884)
+Lithuania <- read_sf("../data/MapAreas/LTU_adm/LTU_adm0.shp") %>%
+  st_transform(25884)
+Poland <- read_sf("../data/MapAreas/POL_adm/POL_adm0.shp") %>%
+  st_transform(25884)
+Germany <- read_sf("../data/MapAreas/DEU_adm/DEU_adm0.shp") %>%
+  st_transform(25884)
+Denmark <- read_sf("../data/MapAreas/DNK_adm/DNK_adm0.shp") %>%
+  st_transform(25884)
+Russia <- read_sf("../data/MapAreas/RUS_adm/RUS_adm1.shp") %>%
+  sf::st_transform(25884)
+Norway <- read_sf("../data/MapAreas/NOR_adm/NOR_adm0.shp") %>%
+  st_transform(25884)
+Belarus <- read_sf("../data/MapAreas/BLR_adm/BLR_adm0.shp") %>%
+  st_transform(25884)
+
+ggplot() + # x is longitude, y is latitude
+  geom_sf(data = Finlandia, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Sweden, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Estonia, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Latvia, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Lithuania, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Poland, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Germany, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Denmark, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Russia, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Norway, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Belarus, colour = "black",fill = "grey", lwd = 0.08) +
+  ggspatial::annotation_scale(location = "br") +
+    theme(panel.grid = element_blank(),
+          panel.background = element_blank()) +
+ # lims(#x = c()
+      # = c(324612.719680, -281620.628068)
+ #) +
+  coord_sf(xlim = c(-284224.671022, 934943.487254), 
+           ylim = c(5906013.992722 , 7349407.055075),
+           crs = st_crs(25884), expand = FALSE)  +
+  annotate("rect", xmin = 83976.726470 - 10000, xmax = 83976.726470 + 10000, ymin = 6333598.553819 - 10000, ymax = 6333598.553819 + 10000, fill = "black") 
+  #annotate("rect", xmin = 54499.033889 - 10000, xmax = 54499.033889 + 10000, ymin = -185279.558525 - 10000, ymax = -185279.558525 + 10000, fill = "black") 
+
+ggsave("../results/LMO_map.png")
 ```
 
 ## Environmental variables
@@ -209,7 +268,6 @@ lmo_metadata %>%
 ggsave("../results/IntroVars.pdf")
 
 ```
-
 
 ## Looking at Chla concentrations Jul-August and calculating yearly average PSU-values
 
@@ -422,7 +480,7 @@ Now that we have seen that the most important players of Nostoc in the phytocoun
 #| warning: false
 
 phytoCount %>%
-  filter(Genus %in% c("Aphanizomenon","Nodularia","Dolichospermum","Pseudo-anabaena","Anabaena")) %>%
+  filter(Genus %in% c("Aphanizomenon","Nodularia","Dolichospermum","Pseudo-anabaena","Anabaena")) %>% 
   group_by(Date, Genus) %>%
   summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>%
   ungroup() %>%
@@ -457,9 +515,44 @@ phytoCount %>%
   ylab(bquote('Biomass '(mgCm^-3))) 
   
 
-ggsave("../results/CountNostocGenus.png", bg = "white")
+ggsave("../results/CountNostocGenus.pdf", bg = "white")
 
 plot1 <- ggplot2::last_plot()
+
+ phytoCount %>%
+  filter(Class %in% c("Nostocophyceae (Cyanophyceae)")) %>% 
+  group_by(Date, Genus) %>%
+  summarise(Biomass_mgC_m3 = sum(Biomass_mgC_m3)) %>%
+  ungroup() %>%
+  inner_join(phytoCount %>% distinct(Date, Year), by = "Date") %>%
+  mutate(year_day = case_when(Year == "2011" ~ julian(Date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(Date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(Date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(Date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(Date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(Date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(Date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(Date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(Date, origin = as.Date("2019-01-01"))
+                              )) %>%
+  filter(Year != "2020") %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = Biomass_mgC_m3, group = Genus, colour = Genus)) +
+  geom_line() +
+  theme_minimal() +
+  theme(strip.text = element_text(size = 10, colour = "black"),
+        axis.text.y = element_text(size = 10, colour = "black"),
+        axis.text.x = element_text(size = 10, colour = "black"),
+        axis.title.x = element_text(size = 10, colour = "black"),
+        axis.title.y = element_text(size = 10, colour = "black", face = "bold"),
+        legend.title = element_text(size = 10, face = "bold", colour = "black"),
+        legend.text = element_text(face = "italic")
+        ) +
+  #scale_color_manual('Genus', values = GENUS_COLOURS1)  +
+  #geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed") +
+  facet_wrap(~ Year, scales = "free_y") +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("Month") +
+  ylab(bquote('Biomass '(mgCm^-3))) 
 ```
 
 ## 16S data overview
@@ -758,7 +851,8 @@ df1 <- relab_table %>%
                               Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
                               )
            
-           )
+           ) %>%
+   mutate(Genus = paste0("*",Genus, "*"))
    
  ggplot(data = df2, mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab*100, fill = Genus, group = Genus, colour = Genus)) +
    geom_line() +
@@ -780,12 +874,13 @@ df1 <- relab_table %>%
   ylab("Relative abundance (%)") +
   guides(fill = "none")
  
- ggsave("../results/16S_NostocAndGenus.png", bg = "white")
+ ggsave("../results/16S_NostocAndGenus.pdf", bg = "white")
  
  plot2 <- ggplot2::last_plot()
 ```
 
 ## Plotting counts and 16S together
+
 ```{r}
 #| label: patchworking
 #| eval: false
@@ -798,7 +893,7 @@ plot1 + plot2 + plot_layout(ncol = 1)  & theme( strip.text = element_text(size =
                                                     legend.title = element_text(size=8),
                                                     legend.text = element_markdown(size = 8)) 
 
-ggsave("../results/Count16S_Nostoc.pdf", width = 18, units = "cm")
+ggsave("../results/Count16S_Nostoc.png", width = 18, units = "cm")
 ```
 
 Proceeding with the Dolichos in the SBDI to look at dynamics.
@@ -929,7 +1024,7 @@ The important ASV's responsible for the species level dynamics in @fig-Nostoc_sp
 
 top10 <- relab_table %>%
   inner_join(asv_tax_species, by = "ASV_ID") %>%
-  filter(Species == "Dolichospermum flosaquae") %>%
+  filter(Genus == "Dolichospermum") %>%
   group_by(ASV_ID) %>%
   summarise(relab = mean(relab)) %>%
   ungroup() %>%
@@ -941,7 +1036,7 @@ top10 <- relab_table %>%
 
 relab_table %>%
   inner_join(asv_tax_species, by = "ASV_ID") %>%
-  filter(Species == "Dolichospermum flosaquae") %>%
+  filter(Genus == "Dolichospermum") %>%
   mutate(topASV = ifelse(ASV_name %in% top10, paste0(ASV_name), paste0("Other"))) %>%
   group_by(topASV, date) %>%
   summarise(relab = sum(relab)) %>%
@@ -965,6 +1060,7 @@ relab_table %>%
   scale_x_date(date_breaks = "2 months", date_labels = "%b")
 
 ggsave("../results/16S_ASV_dynamics.pdf")
+ggsave("../results/16S_ASV_dynamics.png")
 ```
 
 The dominant ASV_131100 reaches peak-abundance in summer, from the period of Mid-June to end of July, with abundances ranging from \~9% up to \> 40%. In December 2012 the ASV reaches peak abundance of \> 30% in December. For the smoothing function, keepin mind that the uprise in December is caused by 2012.\
@@ -1396,8 +1492,7 @@ plot <- relab_table %>%
 
 ggplotly(plot)
 
-
-#Plotting just hte dolicho
+#Plotting just the dolicho (without species specification)
 
  plot <- relab_table %>%
   inner_join(asv_tax_species, by = "ASV_ID") %>%
@@ -1441,7 +1536,7 @@ ggplotly(plot)
 ```
 
 Plotting the relevant ASV's together @fig-relevant_ASVs. Looking at this together with the phytocounts, it would appear that the patterns are better explained by the collective genus expression of several ASV's, as seen in @fig-16SAndPhytoCounts. THIS should be confirmed with correlation.\
-While the large-scale patterns of peaks in summer are congruent, the peaks doesn't line up that well with the counts on a date-to-date basis. This could be due to the nature of the relative data, i.e if other ASV's are highly abundant, they may press down the relative abundance of for example Aphanizomenon, thus hampering the relationship between asbolute and relative abundance. For example the biomass in february 2017 is increasing, while the trend is decreasing in the 16s, in contrast there is also an increase in the gene expression during this date. Still both 16S and count data show a rather wide abundance window for Aphanizomenon.
+While the large-scale patterns of peaks in summer are congruent, the peaks doesn't line up that well with the counts on a date-to-date basis. This could be due to the nature of the relative data, i.e if other ASV's are highly abundant, they may press down the relative abundance of for example Aphanizomenon, thus hampering the relationship between absolute and relative abundance. For example the biomass in february 2017 is increasing, while the trend is decreasing in the 16s, in contrast there is also an increase in the gene expression during this date. Still both 16S and count data show a rather wide abundance window for Aphanizomenon.
 
 ```{r}
 #| label: fig-relevant_ASVs
@@ -1452,7 +1547,9 @@ While the large-scale patterns of peaks in summer are congruent, the peaks doesn
 #|   - "16S"
 #|   - "Apha counts free-yaxis"
 #| layout-ncol: 1
-# Relevant ASVs 
+
+# Relevant ASVs (collected from the manual inspection of the plots above)
+
 ASVVec <- c("ASV_165504", "ASV_27219","ASV_131100","ASV_177401","ASV_101064")
 
 
@@ -1627,7 +1724,7 @@ Not pretty, probably due to the bumpy values in 16S. Correlations are horrible @
 
 corr_df <- relab_table %>%
   inner_join(asv_tax_species, by = "ASV_ID") %>%
-  filter(ASV_name %in% ASVVec) %>%
+  filter(ASV_name == "ASV_131100") %>%
   group_by(ASV_ID, date) %>%
   summarise(relab = sum(relab)) %>%
   ungroup() %>%
@@ -1807,7 +1904,7 @@ temp_ASV %>%
  #Biomass much better indicator in this case
  cor.test(temp_biomass[,1], temp_biomass[,2], method = "spearman")
  
- #PLotting the relationship
+ #Plotting the relationship
  
  temp_biomass %>%
    as.data.frame() %>%
@@ -1817,7 +1914,7 @@ temp_ASV %>%
 
 ## ANOVA test on different seasonal abundances
 
-An abundance test of seasons revealed significant differences between summer-spring and summer-autumn, however no significat difference was observed between summer and winter @fig-ANOVA.
+An abundance test of seasons revealed significant differences between summer-spring and summer-autumn, however no significant difference was observed between summer and winter @fig-ANOVA.
 
 ```{r}
 #| label: fig-ANOVA
@@ -1923,6 +2020,7 @@ plot(TukeyHSD(model, conf.level = .95), las = 2)
 # Supplementary tables
 
 ## Table S1 (16S sequencing stats)
+
 ```{r}
 
 dada2 %>%
@@ -1932,6 +2030,7 @@ dada2 %>%
 ```
 
 ## Table S3 (all ASV'S within Apha/Dolicho and their abundances)
+
 ```{r}
 relab_table %>%
   inner_join(asv_tax_species, by = "ASV_ID") %>%
@@ -1941,4 +2040,3 @@ relab_table %>%
   ungroup() %>% 
   write_tsv("../results/AphaDolichoASVRel.tsv")
 ```
-
