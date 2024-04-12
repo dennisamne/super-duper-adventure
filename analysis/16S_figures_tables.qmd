@@ -30,6 +30,7 @@ library(plotly)
 library(sf)
 library(ggspatial)
 library(patchwork)
+library(ggtext)
 ```
 
 ```{r}
@@ -108,62 +109,12 @@ rename(dates = "Date")
 ```
 
 ## Figure 1
+
 ### Creating a map of the LMO station
 
 ```{r}
 
 TEXT_SIZE = 11
-#Reading in country maps downloaded from https://www.diva-gis.org/gdata
-
-#Trying 3152
-
-Finlandia <- read_sf("../data/MapAreas/FIN_adm/FIN_adm0.shp") %>%
-  st_transform(3152) # Using EPSG 3152 system coordinates
-Sweden <- read_sf("../data/MapAreas/SWE_adm/SWE_adm0.shp") %>%
-  st_transform(3152)
-Estonia <- read_sf("../data/MapAreas/EST_adm/EST_adm0.shp") %>%
-  st_transform(3152)
-Latvia <- read_sf("../data/MapAreas/LVA_adm/LVA_adm0.shp") %>%
-  st_transform(3152)
-Lithuania <- read_sf("../data/MapAreas/LTU_adm/LTU_adm0.shp") %>%
-  st_transform(3152)
-Poland <- read_sf("../data/MapAreas/POL_adm/POL_adm0.shp") %>%
-  st_transform(3152)
-Germany <- read_sf("../data/MapAreas/DEU_adm/DEU_adm0.shp") %>%
-  st_transform(3152)
-Denmark <- read_sf("../data/MapAreas/DNK_adm/DNK_adm0.shp") %>%
-  st_transform(3152)
-Russia <- read_sf("../data/MapAreas/RUS_adm/RUS_adm1.shp") %>%
-  st_transform(3152)
-Belarus <- read_sf("../data/MapAreas/BLR_adm/BLR_adm0.shp") %>%
-  st_transform(3152)
-
-#To convert between coordinate systems I used https://epsg.io/
-
-ggplot() + # x is longitude, y is latitude
-  geom_sf(data = Finlandia, colour = "black",fill = "white", lwd = 0.08) +
-  geom_sf(data = Sweden, colour = "black",fill = "white", lwd = 0.08) +
-  geom_sf(data = Estonia, colour = "black",fill = "white", lwd = 0.08) +
-  geom_sf(data = Latvia, colour = "black",fill = "white", lwd = 0.08) +
-  geom_sf(data = Lithuania, colour = "black",fill = "white", lwd = 0.08) +
-  geom_sf(data = Poland, colour = "black",fill = "white", lwd = 0.08) +
-  geom_sf(data = Germany, colour = "black",fill = "white", lwd = 0.08) +
-  geom_sf(data = Denmark, colour = "black",fill = "white", lwd = 0.08) +
-  geom_sf(data = Russia, colour = "black",fill = "white", lwd = 0.08) +
-  geom_sf(data = Belarus, colour = "black",fill = "white", lwd = 0.08 ) +
-  ggspatial::annotation_scale(location = "br") +
-    theme(panel.grid = element_blank(),
-          panel.background = element_blank()) +
- # lims(#x = c()
-      # = c(324612.719680, -281620.628068)
- #) +
-  coord_sf(xlim = c(-137709.901354, 1007990.155279), 
-           ylim = c(655474.059965 , -596810.880910),
-           crs = st_crs(3152), expand = FALSE) +
-  annotate("rect", xmin = 54499.033889 - 10000, xmax = 54499.033889 + 10000, ymin = -185279.558525 - 10000, ymax = -185279.558525 + 10000, fill = "black") 
-
-
-ggsave("../results/LMO_map.pdf")
 
 #Trying a different projection model
 
@@ -224,10 +175,13 @@ ggsave("../results/LMO_map.png", height = 12/2, width = 16/3, units = "cm")
 The LMO timeseries abiotic and biotic variables exhibited seasonal patterns (@fig-Abioticdata).
 
 ```{r}
+
 #| label: fig-Abioticdata
 #| fig-cap: "Biotic and abiotic variables at the LMO station during years 2011-2019."
 #| warning: false
-# Alternative with temp + inorganic nutrients + chla + cell abundance. It is important that the labeller matches the order of the facet wrap, otherwise the names will appear in the wrong order.
+
+TEXT_SIZE = 10
+
 variable_names <- list(
   'Temperature_C'="Temperature (\u00b0C)",
   'Nitrate_Average'= bquote('Nitrate' ~(µM)),
@@ -275,10 +229,11 @@ ggsave("../results/IntroVars.pdf", height = 12, width = 16, units = "cm")
 ```
 
 ## Figure 2
+
 ### Biovolume plot
 
 ```{r}
-
+#| warning: false
 TEXT_SIZE = 10
 plot1 <- phytoCount %>%
  filter(Genus %in% c("Aphanizomenon","Nodularia","Dolichospermum","Pseudo-anabaena","Anabaena")) %>% 
@@ -322,7 +277,9 @@ plot1
 ```
 
 ### 16S relative abundance plot
+
 ```{r}
+#| warning: false
 relab_table <- asv_tables %>%
   inner_join(sample_ID, by = "sample") %>%
   group_by(date,ASV_ID) %>%
@@ -393,7 +350,7 @@ plot2 <-  ggplot(data = df2, mapping = aes(x = as.Date(year_day, origin = as.Dat
   geom_area(inherit.aes = FALSE, data = df1, aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab*100), alpha = 0.3) +
   geom_point(size = 0.5) +
   facet_wrap(~ Year) +
- scale_color_manual('Genus', values = c("#33A02C")) +
+ scale_color_manual('Genus', values = GENUS_COLOURS2) +
   theme_minimal() +
   theme(strip.background = element_blank(),
         strip.text = element_text(size = TEXT_SIZE, colour = "black"),
@@ -408,8 +365,6 @@ plot2 <-  ggplot(data = df2, mapping = aes(x = as.Date(year_day, origin = as.Dat
   xlab("Month") +
   ylab("Relative abundance (%)") +
   guides(fill = "none")
-
-plot2
 
 #Making a top eleven family vector
 top11vec <- relab_table %>%
@@ -491,13 +446,13 @@ df1 <- relab_table %>%
  ggsave("../results/16S_NostocAndGenus.pdf", bg = "white")
  
  plot2 <- ggplot2::last_plot()
- 
- plot2
 ```
 
 ### biovolume and 16S plot combined
 
 ```{r}
+#| warning: false
+#| output: false
 plot1  + 
   plot2 + 
    plot_annotation(tag_levels = 'a') +
@@ -513,9 +468,10 @@ plot1  +
 ggsave("../results/16S_biomass.png", width = 16, height = 21, units = "cm")
 ```
 
-
 ## Fig S1
+
 ```{r}
+#| warning: false
 top11 <- phytoCount %>%
   group_by(Class) %>%
   summarise(Biovol_mm3_m3 = mean(Biovol_mm3_m3)) %>%
@@ -568,8 +524,11 @@ phytoCount %>%
 ggsave("../results/PhytoCountRel.pdf", width = 18, units = "cm")
 
 ```
+
 ## Figure S2
+
 ```{r}
+#| warning: false
 #Select ten most abundant ASV's based on mean relative abundance.
 
 top10 <- relab_table %>%
@@ -616,6 +575,7 @@ ggsave("../results/16S_ASV_dynamics.png", width = 16, height = 16, units = "cm",
 # Tables
 
 ## Table S1
+
 ```{r}
 dada2 %>%
   semi_join(asv_tables, by = "sample") %>% 
@@ -627,6 +587,7 @@ dada2 %>%
 ## Table S3 (all ASV'S within Apha/Dolicho and their abundances)
 
 ```{r}
+#| warning: false
 relab_table %>%
   inner_join(asv_tax_species, by = "ASV_ID") %>%
   filter(Genus == "Dolichospermum") %>%
@@ -634,4 +595,33 @@ relab_table %>%
   summarise(relab = sum(relab)) %>%
   ungroup() %>% 
   write_tsv("../results/AphaDolichoASVRel.tsv")
+```
+
+## Correlation with biovolume and ASV_131100
+
+```{r}
+## Running ASV 131100 vs biomass
+ASV_biovol_corr <- relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(ASV_name == "ASV_131100") %>%
+  select(date, ASV_ID, relab) %>%
+  rename(Date = "date") %>%
+  mutate(Date = as.Date(Date)) %>%
+  inner_join(phytoCount %>% # joining in the biomass
+               filter(Year != "2020") %>%
+               filter(Genus %in% c("Aphanizomenon")) %>% 
+               group_by(Date, Genus) %>% 
+               summarise(Biovol_mm3_m3 = sum(Biovol_mm3_m3)) %>% 
+               ungroup() %>%
+               select(-Genus),
+             by = "Date"
+  ) %>%
+select(-ASV_ID) %>%
+  filter(Biovol_mm3_m3 > 0) %>%
+  filter(relab > 0) %>%
+  column_to_rownames("Date")
+
+cor.test(ASV_biovol_corr$relab, ASV_biovol_corr$Biovol_mm3_m3, method = "pearson",use = "complete.obs")
+
+write_tsv(ASV_biovol_corr %>% rownames_to_column("Date"), "../data/ASV_biovol_corrDf.tsv")
 ```
