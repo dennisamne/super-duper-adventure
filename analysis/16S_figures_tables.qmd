@@ -1,0 +1,637 @@
+---
+title: "16S figures and tables"
+author: "Dennis Amnebrink"
+affiliation-title: "Linnaeus University"
+title-block-banner: true
+date: now
+editor: visual
+toc: true
+prefer-html: true
+number-sections: true
+format:
+  html:
+     code-fold: true
+     self-contained: true
+---
+
+# Project overview
+
+This project focuses on phytoplankton counts and ASV dynamics of the *Aphanizomenon* and associated Nostocales in the 0.2 µm-fraction at the LMO-station from 2011-03-25 to 2019-12-17. Counts represented per each date is calculated as mean of replicates when available, relative abundances are also based on the mean of replicates.
+
+```{r}
+#| label: libraries
+#| warning: false
+library(data.table)
+library(tidyverse)
+library(vegan)
+library(kableExtra)
+library(DT)
+library(plotly)
+library(sf)
+library(ggspatial)
+library(patchwork)
+```
+
+```{r}
+#| label: colourscheme treatments
+#| warning: false
+GEOM_COL_COLOURS = c(
+  RColorBrewer::brewer.pal(12, name = 'Paired'))
+
+YEAR_COLOURS = c("2011" = "#A6CEE3","2012" = "#1F78B4", "2013" = "#B2DF8A","2014" = "#33A02C", "2015" = "#FB9A99", "2016" = "#E31A1C", "2017" = "#FDBF6F", "2018" = "#FF7F00", "2019" = "#CAB2D6")
+
+GENUS_COLOURS1 = c("Aphanizomenon" = "#33A02C",
+                   "Dolichospermum" = "#1F78B4", 
+                   "Nodularia" = "#A6CEE3",
+                   "Anabaena" = "#CAB2D6",
+                   "Pseudo-anabaena" = "#FF7F00")
+
+GENUS_COLOURS2 = c("*Aphanizomenon/Dolichospermum*" = "#33A02C",
+                   "*Calothrix*" = "#FF7F00",
+                   "*Cuspidothrix*" = "#CAB2D6", 
+                   "*Nodularia*" = "#A6CEE3",
+                   "*Nostoc*" = "#B2DF8A",
+                   "*Rivularia*" ="#FB9A99",
+                   "*Tolypothrix_B*" = "#E31A1C",
+                   "*Trichormus*" = "#FDBF6F",
+                   "Unclassified" = "#FB9A99")
+```
+
+```{r}
+#| label: file_loading
+#| warning: false
+#| cache: true
+
+asv_tables <- fread("../data/ampliseq.ASV_tables.tsv.gz", sep ="\t") # ASV counts per sample, also contains projects other than LMO, i.e "KB", which is for now removed due to the inner_join with sample_ID which LMO is the only project selected.
+
+asv_tax_species <- fread("../data/ampliseq.ASV_tax_species.tsv.gz", sep = "\t") %>% # GTDB SDBI (use this one) 
+mutate(ASV_name = paste0("ASV_",row_number())) # This is to use a better name than ASV kwengkdnsgpkjasdngfpk 
+
+barrnap <- fread("../data/ampliseq.barrnap.tsv.gz", sep = "\t")
+
+dada2 <- fread("../data/ampliseq.DADA2_stats.tsv.gz") # Some of these samples not passable at all. Go through properly and see if needed in analysis... Especially A.andersson project has issues.
+
+SILVA <- fread("../data/ampliseq.SILVA.ASV_tax.tsv.gz") # Different annotations with SILVA and the ASV_tax_species
+
+#Sample_ID - select the correct projects. I.e some have been replaced, J.Pinhassi_14_02 -> J.Pinhassi_20_04.
+# It looks like filtering out A.Andersson samples shouldn't greatly affect the time-series, still a delta of about two weeks.
+
+sample_ID <- fread("../data/jp_samples.tsv", sep = "\t") %>%
+  filter(seqtype == "16SDNA", filter_fraction == "0.2") %>%# Subsetting to relevant samples (308 LMO-samples for 16S at the 0.2µm fraction, so cool!)
+  select(-project) # Remove this information as it is conflicting with the other dataframe, and now project is irrelevant
+# Find / create a sample key for the 16s to actual dates. Check plate runs for decontam, and see if possible to apply from blanks. Should be specific for the samples where the blanks were used.
+
+#Rerun the data to subset on LMO-only to remove unnecessary operations, and filter out chloroplasts etc
+asv_tables <- asv_tables %>% 
+  semi_join(sample_ID, by = "sample")
+
+#Creating a unique ASV-name for each asv that is not "0145477917bfe723a3832c7c63a1853d" (deprecated, now using from tax file)
+#asv_legend <- asv_tables %>%
+#  distinct(ASV_ID) %>%
+ # mutate(ASV_ID = as_factor(ASV_ID) %>% fct_reorder(row_number())) %>% 
+ # mutate(ASV_name = paste0("ASV",row_number())) 
+
+#Reading in a key for cruisnumber to date
+LMODate <- read_tsv("../data/LMOCruiseToDate.tsv") %>%
+   mutate(season = ifelse(grepl("201[0-9]-0[3-5]-", Date), "spring",
+                           ifelse(grepl("201[0-9]-0[6-8]-", Date), "summer",
+                                  ifelse(grepl("201[0-9]-09-|201[0-9]-10-|201[0-9]-11-", Date), "autumn", "winter"))))
+
+# Reading in phytoplankton count figure and converting to understandable format and joining in dates
+phytoCount <- read_tsv("../data/phyto_counts_USE_20210614.tsv") %>% 
+  inner_join(LMODate, by = "LMO") %>%
+  filter(!is.na(Biomass_mgC_m3)) %>%# Removing NA's from dataset as they interfere with operations
+  mutate(Year = str_extract(Date, "[0-9][0-9][0-9][0-9]")) # Adding year as a separate column
+
+lmo_metadata <- read_tsv("../data/LMO_metadata1.tsv.gz", col_types = cols(.default = col_number(), Chla_Average = col_number(), Date = col_datetime())) %>%
+rename(dates = "Date")
+```
+
+## Figure 1
+### Creating a map of the LMO station
+
+```{r}
+
+TEXT_SIZE = 11
+#Reading in country maps downloaded from https://www.diva-gis.org/gdata
+
+#Trying 3152
+
+Finlandia <- read_sf("../data/MapAreas/FIN_adm/FIN_adm0.shp") %>%
+  st_transform(3152) # Using EPSG 3152 system coordinates
+Sweden <- read_sf("../data/MapAreas/SWE_adm/SWE_adm0.shp") %>%
+  st_transform(3152)
+Estonia <- read_sf("../data/MapAreas/EST_adm/EST_adm0.shp") %>%
+  st_transform(3152)
+Latvia <- read_sf("../data/MapAreas/LVA_adm/LVA_adm0.shp") %>%
+  st_transform(3152)
+Lithuania <- read_sf("../data/MapAreas/LTU_adm/LTU_adm0.shp") %>%
+  st_transform(3152)
+Poland <- read_sf("../data/MapAreas/POL_adm/POL_adm0.shp") %>%
+  st_transform(3152)
+Germany <- read_sf("../data/MapAreas/DEU_adm/DEU_adm0.shp") %>%
+  st_transform(3152)
+Denmark <- read_sf("../data/MapAreas/DNK_adm/DNK_adm0.shp") %>%
+  st_transform(3152)
+Russia <- read_sf("../data/MapAreas/RUS_adm/RUS_adm1.shp") %>%
+  st_transform(3152)
+Belarus <- read_sf("../data/MapAreas/BLR_adm/BLR_adm0.shp") %>%
+  st_transform(3152)
+
+#To convert between coordinate systems I used https://epsg.io/
+
+ggplot() + # x is longitude, y is latitude
+  geom_sf(data = Finlandia, colour = "black",fill = "white", lwd = 0.08) +
+  geom_sf(data = Sweden, colour = "black",fill = "white", lwd = 0.08) +
+  geom_sf(data = Estonia, colour = "black",fill = "white", lwd = 0.08) +
+  geom_sf(data = Latvia, colour = "black",fill = "white", lwd = 0.08) +
+  geom_sf(data = Lithuania, colour = "black",fill = "white", lwd = 0.08) +
+  geom_sf(data = Poland, colour = "black",fill = "white", lwd = 0.08) +
+  geom_sf(data = Germany, colour = "black",fill = "white", lwd = 0.08) +
+  geom_sf(data = Denmark, colour = "black",fill = "white", lwd = 0.08) +
+  geom_sf(data = Russia, colour = "black",fill = "white", lwd = 0.08) +
+  geom_sf(data = Belarus, colour = "black",fill = "white", lwd = 0.08 ) +
+  ggspatial::annotation_scale(location = "br") +
+    theme(panel.grid = element_blank(),
+          panel.background = element_blank()) +
+ # lims(#x = c()
+      # = c(324612.719680, -281620.628068)
+ #) +
+  coord_sf(xlim = c(-137709.901354, 1007990.155279), 
+           ylim = c(655474.059965 , -596810.880910),
+           crs = st_crs(3152), expand = FALSE) +
+  annotate("rect", xmin = 54499.033889 - 10000, xmax = 54499.033889 + 10000, ymin = -185279.558525 - 10000, ymax = -185279.558525 + 10000, fill = "black") 
+
+
+ggsave("../results/LMO_map.pdf")
+
+#Trying a different projection model
+
+Finlandia <- read_sf("../data/MapAreas/FIN_adm/FIN_adm0.shp") %>%
+  st_transform(25884) # Using EPSG 25884 system coordinates
+Sweden <- read_sf("../data/MapAreas/SWE_adm/SWE_adm0.shp") %>%
+  st_transform(25884) 
+Estonia <- read_sf("../data/MapAreas/EST_adm/EST_adm0.shp") %>%
+  st_transform(25884)
+Latvia <- read_sf("../data/MapAreas/LVA_adm/LVA_adm0.shp") %>%
+  st_transform(25884)
+Lithuania <- read_sf("../data/MapAreas/LTU_adm/LTU_adm0.shp") %>%
+  st_transform(25884)
+Poland <- read_sf("../data/MapAreas/POL_adm/POL_adm0.shp") %>%
+  st_transform(25884)
+Germany <- read_sf("../data/MapAreas/DEU_adm/DEU_adm0.shp") %>%
+  st_transform(25884)
+Denmark <- read_sf("../data/MapAreas/DNK_adm/DNK_adm0.shp") %>%
+  st_transform(25884)
+Russia <- read_sf("../data/MapAreas/RUS_adm/RUS_adm1.shp") %>%
+  sf::st_transform(25884)
+Norway <- read_sf("../data/MapAreas/NOR_adm/NOR_adm0.shp") %>%
+  st_transform(25884)
+Belarus <- read_sf("../data/MapAreas/BLR_adm/BLR_adm0.shp") %>%
+  st_transform(25884)
+
+ggplot() + # x is longitude, y is latitude
+  geom_sf(data = Finlandia, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Sweden, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Estonia, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Latvia, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Lithuania, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Poland, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Germany, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Denmark, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Russia, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Norway, colour = "black",fill = "grey", lwd = 0.08) +
+  geom_sf(data = Belarus, colour = "black",fill = "grey", lwd = 0.08) +
+  ggspatial::annotation_scale(location = "br") +
+    theme(panel.grid = element_blank(),
+          panel.background = element_blank(),
+          axis.text = element_text(size = TEXT_SIZE, colour = "black")
+          )+
+ # lims(#x = c()
+      # = c(324612.719680, -281620.628068)
+ #) +
+  coord_sf(xlim = c(-284224.671022, 934943.487254), 
+           ylim = c(5906013.992722 , 7349407.055075),
+           crs = st_crs(25884), expand = FALSE)  +
+  annotate("rect", xmin = 83976.726470 - 10000, xmax = 83976.726470 + 10000, ymin = 6333598.553819 - 10000, ymax = 6333598.553819 + 10000, fill = "black") 
+  #annotate("rect", xmin = 54499.033889 - 10000, xmax = 54499.033889 + 10000, ymin = -185279.558525 - 10000, ymax = -185279.558525 + 10000, fill = "black") 
+
+ggsave("../results/LMO_map.png", height = 12/2, width = 16/3, units = "cm")
+```
+
+### Environmental variables
+
+The LMO timeseries abiotic and biotic variables exhibited seasonal patterns (@fig-Abioticdata).
+
+```{r}
+#| label: fig-Abioticdata
+#| fig-cap: "Biotic and abiotic variables at the LMO station during years 2011-2019."
+#| warning: false
+# Alternative with temp + inorganic nutrients + chla + cell abundance. It is important that the labeller matches the order of the facet wrap, otherwise the names will appear in the wrong order.
+variable_names <- list(
+  'Temperature_C'="Temperature (\u00b0C)",
+  'Nitrate_Average'= bquote('Nitrate' ~(µM)),
+  'Phosphate_Average' = bquote('Phosphate' ~(µM)),
+  'Chla_Average'= bquote('Chla Average' ~(µgL^-1)),
+  'Salinity_PSU' = 'Salinity (PSU)'
+)
+
+variable_labeller <- function(variable,value){
+  return(variable_names[value])
+}
+
+lmo_metadata %>%
+  select(dates, Temperature_C, Salinity_PSU,Chla_Average, Nitrate_Average, Phosphate_Average) %>%
+  pivot_longer(cols = c(2:6), names_to = "variable") %>%
+  mutate(variable = factor(variable, levels = c("Temperature_C","Nitrate_Average","Phosphate_Average","Chla_Average","Salinity_PSU"))) %>%
+  mutate(Year = str_extract(dates, "[0-9][0-9][0-9][0-9]")) %>%
+  mutate(dates = as.Date(dates)) %>%
+  mutate(year_day = case_when(Year == "2011" ~ julian(dates, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(dates, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(dates, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(dates, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(dates, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(dates, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(dates, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(dates, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(dates, origin = as.Date("2019-01-01"))
+                              )) %>%
+            ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y =value, colour = Year)) +
+  geom_line() +
+  facet_wrap(variable ~ ., labeller=variable_labeller, strip.position = "left",scales = "free_y") + 
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("") +
+  ylab('') +
+  theme_minimal() +
+  theme(strip.placement = "outside",
+        axis.text.y = element_text(size = TEXT_SIZE, colour = "black"),
+        axis.text.x = element_text(size = TEXT_SIZE, colour = "black", angle = 270, hjust = 1),
+        legend.text = element_text(size = TEXT_SIZE, colour = "black"), 
+        legend.title = element_text(size = TEXT_SIZE, colour = "black", face = "bold")) +
+  scale_colour_manual('Year', values = YEAR_COLOURS) 
+
+ggsave("../results/IntroVars.pdf", height = 12, width = 16, units = "cm")
+
+```
+
+## Figure 2
+### Biovolume plot
+
+```{r}
+
+TEXT_SIZE = 10
+plot1 <- phytoCount %>%
+ filter(Genus %in% c("Aphanizomenon","Nodularia","Dolichospermum","Pseudo-anabaena","Anabaena")) %>% 
+  group_by(Date, Genus) %>%
+  summarise(Biovol_mm3_m3 = sum(Biovol_mm3_m3)) %>%
+  ungroup() %>%
+  inner_join(phytoCount %>% distinct(Date, Year), by = "Date") %>%
+  mutate(year_day = case_when(Year == "2011" ~ julian(Date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(Date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(Date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(Date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(Date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(Date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(Date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(Date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(Date, origin = as.Date("2019-01-01"))
+                              )) %>%
+  filter(Year != "2020") %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = Biovol_mm3_m3, group = Genus, colour = Genus)) +
+  geom_line() +
+  theme_minimal() +
+  theme(strip.text = element_text(size = TEXT_SIZE, colour = "black"),
+        axis.text.y = element_text(size = TEXT_SIZE, colour = "black"),
+        axis.text.x = element_text(size = TEXT_SIZE, colour = "black", angle = 270, hjust = 1),
+        axis.title.x = element_text(size = TEXT_SIZE, colour = "black"),
+        axis.title.y = element_text(size = TEXT_SIZE, colour = "black", face = "bold"),
+        legend.title = element_text(size = TEXT_SIZE, face = "bold", colour = "black"),
+        legend.text = element_text(face = "italic"),
+        legend.position = "bottom"
+        ) +
+  scale_color_manual('Genus', values = GENUS_COLOURS1)  +
+  #geom_vline(yintercept = 0, xintercept = as.Date("2015-01-01"), linetype = "dashed") +
+  facet_wrap(~ Year, scales = "free_y") +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("Month") +
+  ylab(bquote('Biovolume '(mm^3~m^-3))) +
+  guides(fill = "none",
+         colour=guide_legend(title.position = "top", nrow = 2))
+
+plot1
+```
+
+### 16S relative abundance plot
+```{r}
+relab_table <- asv_tables %>%
+  inner_join(sample_ID, by = "sample") %>%
+  group_by(date,ASV_ID) %>%
+  summarise(count = mean(count)) %>%
+  ungroup() %>%
+  group_by(date) %>%
+  mutate(relab = count/sum(count)) %>%
+  ungroup() 
+
+#Making a top eleven family vector
+top11vec <- relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  group_by(Family) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  arrange(desc(relab)) %>%
+  slice(1:11) %>%
+  pull(Family)
+
+df1 <- relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>% 
+  mutate(Family = ifelse(Family %in% top11vec, paste0(Family), paste0("Other"))) %>%
+  group_by(Family, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  filter(Family == "Nostocaceae") 
+  
+
+ df2 <-  relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(Family == "Nostocaceae") %>%
+  mutate(Genus = ifelse(Genus == "Dolichospermum", paste0("Aphanizomenon/Dolichospermum"),paste0(Genus))) %>%
+  mutate(Genus = gsub("^$", "Unclassified", Genus)) %>%
+  group_by(Genus, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+   mutate(Genus = paste0("*",Genus, "*")) 
+   
+plot2 <-  ggplot(data = df2, mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab*100, fill = Genus, group = Genus, colour = Genus)) +
+   geom_line() +
+  #geom_line(data = df2, aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab, fill = Genus, group = Genus)) +
+  geom_area(inherit.aes = FALSE, data = df1, aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab*100), alpha = 0.3) +
+  geom_point(size = 0.5) +
+  facet_wrap(~ Year) +
+ scale_color_manual('Genus', values = c("#33A02C")) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = TEXT_SIZE, colour = "black"),
+        legend.title = element_text(size = TEXT_SIZE, face = "bold", colour = "black"),
+        legend.text = element_markdown(size = TEXT_SIZE, colour = "black"),
+        legend.position = "bottom",
+        axis.text = element_text(size = TEXT_SIZE, colour = "black"),
+        axis.text.x = element_text(size = TEXT_SIZE, colour = "black", angle = 270, hjust = 1),
+        axis.title = element_text(size = TEXT_SIZE,colour = "black")
+        ) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("Month") +
+  ylab("Relative abundance (%)") +
+  guides(fill = "none")
+
+plot2
+
+#Making a top eleven family vector
+top11vec <- relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  group_by(Family) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  arrange(desc(relab)) %>%
+  slice(1:11) %>%
+  pull(Family)
+
+df1 <- relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>% 
+  mutate(Family = ifelse(Family %in% top11vec, paste0(Family), paste0("Other"))) %>%
+  group_by(Family, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+  filter(Family == "Nostocaceae") 
+  
+ df2 <-  relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(Family == "Nostocaceae") %>%
+  mutate(Genus = ifelse(Genus == "Dolichospermum", paste0("Aphanizomenon/Dolichospermum"),paste0(Genus))) %>%
+  mutate(Genus = gsub("^$", "Unclassified", Genus)) %>%
+  group_by(Genus, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+   mutate(year_day = case_when(Year == "2011" ~ julian(date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>%
+   mutate(Genus = paste0("*",Genus, "*"))
+   
+ ggplot(data = df2, mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab*100, fill = Genus, group = Genus, colour = Genus)) +
+   geom_line() +
+  #geom_line(data = df2, aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab, fill = Genus, group = Genus)) +
+  geom_area(inherit.aes = FALSE, data = df1, aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = relab*100), alpha = 0.3) +
+  geom_point(size = 0.5) +
+  facet_wrap(~ Year) +
+ scale_color_manual('Genus', values = GENUS_COLOURS2) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = TEXT_SIZE, colour = "black"),
+        legend.title = element_text(size = TEXT_SIZE, face = "bold", colour = "black"),
+        legend.text = element_markdown(size = TEXT_SIZE, colour = "black"),
+        legend.position = "bottom",
+        axis.text.y = element_text(size = TEXT_SIZE, colour = "black"),
+        axis.text.x = element_text(size = TEXT_SIZE, colour = "black", angle = 270, hjust = 1),
+        axis.title = element_text(size = TEXT_SIZE,colour = "black")
+        ) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("Month") +
+  ylab("Relative abundance (%)") +
+  guides(fill = "none",
+         colour=guide_legend(nrow = 3, title.position = "top"))
+ 
+ ggsave("../results/16S_NostocAndGenus.pdf", bg = "white")
+ 
+ plot2 <- ggplot2::last_plot()
+ 
+ plot2
+```
+
+### biovolume and 16S plot combined
+
+```{r}
+plot1  + 
+  plot2 + 
+   plot_annotation(tag_levels = 'a') +
+  plot_layout(ncol = 1)  & theme(strip.text = element_text(size = TEXT_SIZE),
+                                                axis.text.x = element_text(size = TEXT_SIZE),
+                                                axis.text.y = element_text(size = TEXT_SIZE),
+                                                axis.title = element_text(size = TEXT_SIZE),
+                                                    legend.key.size = unit(0.4, 'cm'),
+                                                    legend.title = element_text(size=TEXT_SIZE),
+                                                    legend.text = element_markdown(size = TEXT_SIZE)) 
+  
+
+ggsave("../results/16S_biomass.png", width = 16, height = 21, units = "cm")
+```
+
+
+## Fig S1
+```{r}
+top11 <- phytoCount %>%
+  group_by(Class) %>%
+  summarise(Biovol_mm3_m3 = mean(Biovol_mm3_m3)) %>%
+  ungroup() %>%
+  filter(!Class %in% c("Litostomatea", "0")) %>%
+  filter(!is.na(Class)) %>%
+  arrange(desc(Biovol_mm3_m3)) %>%
+  slice(1:11) %>%
+  pull(Class)
+
+phytoCount %>%
+  filter(!Class %in% c("Litostomatea", "0")) %>% #Litostomatea not autotrophic so removed.
+  filter(!is.na(Class)) %>%
+  mutate(Class = ifelse(Class %in% top11, paste0(Class),paste0("Other"))) %>%
+  group_by(Date) %>%
+  mutate(percentage = Biovol_mm3_m3/sum(Biovol_mm3_m3)) %>%
+  ungroup() %>%
+  group_by(Date, Class) %>%
+  summarise(percentage = sum(percentage)) %>%
+  ungroup() %>%
+  inner_join(phytoCount %>% distinct(Year, Date), by = "Date") %>% #Reinserting year information
+  mutate(year_day = case_when(Year == "2011" ~ julian(Date, origin = as.Date("2011-01-01")),
+                              Year == "2012" ~ julian(Date, origin = as.Date("2012-01-01")),
+                              Year == "2013" ~ julian(Date, origin = as.Date("2013-01-01")),
+                              Year == "2014" ~ julian(Date, origin = as.Date("2014-01-01")),
+                              Year == "2015" ~ julian(Date, origin = as.Date("2015-01-01")),
+                              Year == "2016" ~ julian(Date, origin = as.Date("2016-01-01")),
+                              Year == "2017" ~ julian(Date, origin = as.Date("2017-01-01")),
+                              Year == "2018" ~ julian(Date, origin = as.Date("2018-01-01")),
+                              Year == "2019" ~ julian(Date, origin = as.Date("2019-01-01"))
+                              )
+           
+           ) %>% #Adding Julian day information
+  filter(Year != "2020") %>%
+  mutate(Class = gsub(" ","\n", Class)) %>%
+  ggplot(mapping = aes(x = as.Date(year_day, origin = as.Date("2011-01-01")), y = percentage*100, fill = fct_relevel(Class, "Other", after = Inf))) +
+  geom_col(width = 4) +
+  theme_minimal() +
+  theme(legend.position = "bottom",
+        axis.text.y = element_text(size = TEXT_SIZE, colour = "black"),
+        axis.text.x = element_text(size = TEXT_SIZE, colour = "black"),
+        legend.text = element_text(size = TEXT_SIZE, colour = "black"), 
+        legend.title = element_text(size = TEXT_SIZE, colour = "black", face = "bold")) +
+  scale_fill_manual('Class', values = GEOM_COL_COLOURS) +
+  facet_wrap(~ Year) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b") +
+  xlab("Month") +
+  ylab("Relative abundance (%)")
+
+ggsave("../results/PhytoCountRel.pdf", width = 18, units = "cm")
+
+```
+## Figure S2
+```{r}
+#Select ten most abundant ASV's based on mean relative abundance.
+
+top10 <- relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(Genus == "Dolichospermum") %>%
+  group_by(ASV_ID) %>%
+  summarise(relab = mean(relab)) %>%
+  ungroup() %>%
+  arrange(desc(relab)) %>%
+  slice(1:10) %>%
+  inner_join(asv_tax_species %>% distinct(ASV_ID, ASV_name), by = "ASV_ID") %>%
+  pull(ASV_name)
+  
+
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(Genus == "Dolichospermum") %>%
+  mutate(topASV = ifelse(ASV_name %in% top10, paste0(ASV_name), paste0("Other"))) %>%
+  group_by(topASV, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>%
+  mutate(Year = str_extract(date, "[0-9][0-9][0-9][0-9]")) %>%
+           ggplot(mapping = aes(x = date, y = relab*100, group = topASV, colour = topASV)) +
+  geom_line() +
+  geom_point() +
+  scale_color_manual('Year', values = GEOM_COL_COLOURS) +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = TEXT_SIZE, colour = "black"),
+        legend.title = element_text(size = TEXT_SIZE, face = "bold", colour = "black"),
+        legend.text = element_text(size = TEXT_SIZE, colour = "black"),
+        axis.text = element_text(size = TEXT_SIZE, colour = "black"),
+        axis.title = element_text(size = TEXT_SIZE, colour = "black")
+        ) +
+  facet_wrap(~ Year, scales = "free_x") +
+  xlab("Month") +
+  ylab("Relative Abundance (%)") +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b")
+
+ggsave("../results/16S_ASV_dynamics.pdf")
+ggsave("../results/16S_ASV_dynamics.png", width = 16, height = 16, units = "cm", bg = "white", dpi = 400)
+```
+
+# Tables
+
+## Table S1
+```{r}
+dada2 %>%
+  semi_join(asv_tables, by = "sample") %>% 
+  left_join(sample_ID, by = "sample") %>% 
+  select(2:8) %>% 
+  write_tsv("../results/16S_seq_stats.tsv")
+```
+
+## Table S3 (all ASV'S within Apha/Dolicho and their abundances)
+
+```{r}
+relab_table %>%
+  inner_join(asv_tax_species, by = "ASV_ID") %>%
+  filter(Genus == "Dolichospermum") %>%
+  group_by(Species, date) %>%
+  summarise(relab = sum(relab)) %>%
+  ungroup() %>% 
+  write_tsv("../results/AphaDolichoASVRel.tsv")
+```
