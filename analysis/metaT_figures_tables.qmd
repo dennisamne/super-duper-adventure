@@ -1,0 +1,1054 @@
+---
+title: "metaT_figures_tables"
+author: "Dennis Amnebrink"
+affiliation-title: "Linnaeus University"
+title-block-banner: true
+date: now
+editor: visual
+toc: true
+prefer-html: true
+number-sections: true
+format:
+  html:
+     code-fold: true
+     self-contained: true
+---
+
+```{r}
+#| label: libraries
+#| warning: false
+library(data.table)
+library(tidyverse)
+library(vegan)
+library(rain)
+library(ggConvexHull)
+library(DT)
+library(kableExtra)
+library(Hmisc)
+library(patchwork)
+library(ggtext)
+library(gridExtra)
+library(scales)
+```
+
+```{r}
+#| label: colourscheme treatments
+#| warning: false
+GEOM_COL_COLOURS = c(
+  RColorBrewer::brewer.pal(12, name = 'Paired'))
+
+SEASON_COLOURS = c("spring" = "#33A02C", "summer" = "#E31A1C",  "autumn" =  "#FF7F00", "winter" = "#1F78B4")
+
+TEXT_SIZE = 10
+```
+
+```{r}
+#| label: files
+#| warning: false
+#| cache: true
+
+# Loading annotation file of expressed genes
+  eggnog_names <- c("Geneid", "MAG", "contig", "Start", "End", "Strand", "Length", "seed_eggNOG_ortholog", "seed_ortholog_evalue", "seed_ortholog_score", "Predicted_taxonomic_group", "Predicted_protein_name", "Gene_Ontology_terms", "EC_number", "KEGG_ko", "KEGG_Pathway", "KEGG_Module", "KEGG_Reaction", "KEGG_rclass", "BRITE", "KEGG_TC", "CAZy", "BiGG Reaction", "tax_scope:eggNOG_taxonomic_level_used_for_annotation", "eggNOG_OGs", "bestOG", "COG_Functional_Category", "eggNOG_free_text_description", "sample", "counts")
+  
+  eggnog_table <- read_tsv("../data/eggnog_table_long.tsv.gz", col_types = cols(Start = col_integer(), End = col_integer(), Length = col_integer(), counts = col_integer(), X7 = col_character())) %>%
+                             separate(Chr, c("MAG", "contig"), sep ="_k", remove = TRUE) 
+  eggnog_table$sample <- sub('.non_rRNA.pe.bowtie2.q5', '', eggnog_table$sample)
+   eggnog_table$sample <- sub('.ca.pesickle.pe.bowtie2.sorted.unmappedpairs.pe.bowtie2.q5', '', eggnog_table$sample) 
+   eggnog_table$sample <- sub('.lane00[0-9].ca.pesickle.pe.bowtie2.q5', '', eggnog_table$sample) 
+   eggnog_table$sample <- sub("^", "P", eggnog_table$sample)
+   eggnog_table$sample <- sub("PP", "P", eggnog_table$sample)
+   eggnog_table$sample <- sub(".sorted.bam", "", eggnog_table$sample)
+   
+   colnames(eggnog_table) <- eggnog_names
+   
+   eggnog_table <- eggnog_table %>%
+      mutate(Predicted_protein_name = ifelse(Geneid %in% c("OFJACKGI_02436","OFJACKGI_00660","OFJACKGI_02602"), paste0("psbA"),paste0(Predicted_protein_name))) # These two names were annotated as pufM, as this is unreasonable, they were compared against the prokka annotation which then was used to verify that they are instead psbA
+   
+   # Loading date file/sample key
+   lmo_id_date <- read_tsv("../data/lmo_id_date.tsv.gz") %>%
+    dplyr::select(1, 2) %>% 
+    dplyr::rename(dates=2) %>%
+    dplyr::rename(sample="Sample") %>%
+    mutate(season = ifelse(grepl("201[0-9]-0[3-5]-", dates), "spring",
+                           ifelse(grepl("201[0-9]-0[6-8]-", dates), "summer",
+                                  ifelse(grepl("201[0-9]-09-|201[0-9]-10-|201[0-9]-11-", dates), "autumn", "winter")))) %>%
+    mutate(filter_frac = ifelse(grepl("201[2-5]", dates), "filtered", "unfiltered")) %>%
+    mutate(year = str_extract(dates, "[0-9][0-9][0-9][0-9]"))
+  lmo_id_date$sample <- sub('P12052_1', 'P12052_3', lmo_id_date$sample) 
+  
+  #Taxonomy file
+  BACL_taxonomy <- read_tsv("../data/BACL_identities.tsv.gz") %>%
+    separate("Taxonomy", c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), sep = ";[a-z]__", remove = T) %>%
+    mutate(location = ifelse(grepl("*P2236*",MAG ), "redox",
+                             ifelse(grepl("*P1994*", MAG), "transect",
+                                    ifelse(grepl("*SRR*", MAG), "askö", "LMO"))))
+  
+  # Orf-file incluing only expressed genes
+#cds_table<- read_tsv("../data/cds_counts_filtered.tsv") #This is the od-file, used for now.
+
+COG_cats <- read_tsv("../data/COG_categories.tsv") %>%
+  rename(COG_Functional_Category = "COG_category")
+ 
+
+lmo_metadata <- read_tsv("../data/LMO_metadata1.tsv.gz", col_types = cols(.default = col_number(), Chla_Average = col_number(), Date = col_datetime())) %>% subset(Date > "2016-01-01" & Date < "2017-12-31") %>%
+rename(dates = "Date")
+
+#Dataframe with the annotated genes, even those not expressed
+all_annotations <- read_tsv("../data/eggnog_annotated.tsv.gz") %>%
+  select(1, "Chr", "X6")
+
+
+# This file is to connect the LMO-cruise number with the NGI-project ID's
+sample_key <- read_csv("../data/samplesheet.csv") %>%
+  mutate(sampleDate = str_extract(fastq_1, "P[0-9]*_[0-9]*")) %>%
+  select(sample, sampleDate)
+
+# Reading in sample translation for the LMO-numbers (used to join cds_table with sample_ID file)
+samplesheet <- read_csv("../data/samplesheet.csv") %>%
+  rename(LMO_ID = "sample", sample = 2) %>%
+  select(-3) %>%
+  mutate(sample = gsub("./samples/","", sample),
+         sample = gsub(".r1.fastq.gz","", sample),
+         sample = gsub(".lane00[0-9]","", sample)
+         )
+
+cds_table <- read_tsv("../data/alneberg_bacls0.90.fc.CDS.tsv.gz", comment = "#") %>%
+  separate(Chr, c("MAG", "contig"), sep = "_k") %>% #extracting MAG name
+  filter(MAG == "P1994_122_bin236") %>% #Selecting relevant MAG
+  pivot_longer(cols = 8:ncol(.), names_to = "sample") %>% #Long format
+  mutate(sample = gsub(".bam","", sample)) %>% #Removing .bam for joining in with sample file later
+  rename(LMO_ID = "sample",
+         counts = "value") %>% #Matching names for samplesheet
+  inner_join(samplesheet, by = "LMO_ID") %>%
+  select(-LMO_ID)
+
+# The new overall stats
+new_reads_stats <- read_tsv("../data/megahit.prokka.overall_stats.tsv.gz")
+
+#Reading in the total reads from the assembly
+assembly_reads <- fread("../data/megahit.prokka.counts.tsv.gz", sep = "\t") %>%
+  group_by(sample) %>%
+  summarise(sample_counts = sum(count)) %>%
+  ungroup() %>%
+  inner_join(sample_key, by = "sample") %>%
+  select(-sample) %>%
+  rename(sample = "sampleDate")
+
+LMODate <- read_tsv("../data/LMOCruiseToDate.tsv") %>%
+   mutate(season = ifelse(grepl("201[0-9]-0[3-5]-", Date), "spring",
+                           ifelse(grepl("201[0-9]-0[6-8]-", Date), "summer",
+                                  ifelse(grepl("201[0-9]-09-|201[0-9]-10-|201[0-9]-11-", Date), "autumn", "winter"))))
+
+# Reading in phytoplankton count figure and converting to understandable format and joining in dates
+phytoCount <- read_tsv("../data/phyto_counts_USE_20210614.tsv") %>% 
+  inner_join(LMODate, by = "LMO") %>%
+  filter(!is.na(Biomass_mgC_m3)) %>%# Removing NA's from dataset as they interfere with operations
+  mutate(Year = str_extract(Date, "[0-9][0-9][0-9][0-9]"))
+
+#Total reads
+total_reads <- read_tsv("../data/community_assembly_stats/total_reads.tsv", col_names = F) %>%
+  separate(X1, c("LMO_ID","total_reads"), sep = "              ") %>%
+  mutate(total_reads = gsub(",","", total_reads) %>% as.numeric()) %>%
+  inner_join(samplesheet, by = "LMO_ID")
+
+#rRNA depleted reads
+non_rRNA <- read_tsv("../data/community_assembly_stats/non_rRNA_reads.tsv", col_names = c("LMO_ID", "non_rRNA"))
+```
+
+### Table S2
+```{r}
+#| warning: false
+# Creating the overview of the reads from both assembly and mag reads
+metaT_seq_stats <- total_reads %>%
+  inner_join(non_rRNA, by = "LMO_ID") %>%
+  inner_join(assembly_reads %>% rename(assembly_CDS = "sample_counts"), by = "sample") %>%
+  inner_join(cds_table %>%
+               group_by(sample) %>%
+               summarise(MAG_CDS = sum(counts)) %>% 
+               ungroup(),
+             by = "sample") %>%
+  select(sample, total_reads, non_rRNA, assembly_CDS, MAG_CDS)
+
+
+write_tsv(metaT_seq_stats, "../results/metaT_sequencing_stats.tsv")
+```
+
+```{r}
+#| label: filtering-low-abundant-dates
+#| warning: false
+#| cache: true
+
+genes_and_paths_top50 <- cds_table %>% 
+  inner_join(lmo_id_date, by = "sample") %>%
+  dplyr::filter(filter_frac == "unfiltered") %>%
+  group_by(dates, Geneid, MAG) %>% 
+  summarise(counts = as.integer(mean(counts))) %>%
+  ungroup() %>%
+  inner_join(cds_table %>% distinct(Geneid, Length)) %>%
+  group_by(MAG, dates) %>%
+  mutate(t = counts/Length) %>%
+  mutate(tpm = t/sum(t)*1e6) %>%
+  ungroup() %>%
+  dplyr::select(-t) 
+ 
+cds_table_filtered <- cds_table %>%  inner_join(lmo_id_date, by = "sample") %>% dplyr::filter(filter_frac == "unfiltered") %>% group_by(dates, MAG, Geneid) %>% summarise(counts = mean(counts)) %>% ungroup() %>% group_by(MAG, dates) %>% summarise(counts = sum(counts)) %>% ungroup() %>% dplyr::filter(counts >= 3000)
+
+genes_and_paths_top50 %>% semi_join(cds_table_filtered, by = c("MAG","dates")) -> filtered_genes_and_paths_top50
+```
+
+## RAIN analysis
+
+```{r rain_final_52_weeks_orf_level}
+#| label: rain-run
+#| warning: false
+#| cache: true
+
+for_rain <- cds_table %>%
+    inner_join(lmo_id_date, by = "sample") %>%
+    filter(filter_frac == "unfiltered") %>%
+    filter(MAG == "P1994_122_bin236") %>%
+    group_by(MAG, dates) %>%
+    mutate(t = counts/Length) %>%
+    mutate(tpm = t/sum(t)*1e6) %>%
+    ungroup() %>%
+    select(-t) %>%
+    group_by(Geneid, MAG, dates) %>%
+    summarise(tpm = sum(tpm)) %>%
+    ungroup()
+
+# Before the loop
+all_weeks <- as.data.frame(seq(from = 1, to = 104, by = 1)) 
+
+colnames(all_weeks) <- "week"
+
+# Making the table again with counts, to exclude low counts, use this as a semijoin by Geneid beforfe spreading
+
+counts_filter <- cds_table %>%
+    inner_join(lmo_id_date, by = "sample") %>%
+    filter(filter_frac == "unfiltered") %>%
+    filter(MAG == "P1994_122_bin236") %>%
+    group_by(MAG, dates, Geneid) %>%
+    mutate(counts = mean(counts)) %>%
+    ungroup() %>%
+    select(Geneid, counts, dates) %>%
+    group_by(Geneid) %>%
+    summarise(tot_counts = sum(counts)) %>%
+    ungroup() %>%
+    filter(tot_counts > 100)
+
+counts_filter2 <- cds_table %>%
+    inner_join(lmo_id_date, by = "sample") %>%
+    filter(filter_frac == "unfiltered") %>%
+    filter(MAG == "P1994_122_bin236") %>%
+    group_by(MAG, dates, Geneid) %>%
+    mutate(counts = mean(counts)) %>%
+    ungroup() %>%
+    select(Geneid, counts, dates) %>%
+    semi_join(counts_filter, by = "Geneid") %>%
+    group_by(Geneid) %>%
+    tally() %>%
+    ungroup() %>%
+    filter(n > 5)
+  
+# This works, now make the argument for counts in 2 samples or less, e.g counts != 0 in 
+mag_time_points <- for_rain %>%
+  mutate(year_day = julian(dates, origin = as.Date("2016-01-01"))) %>%
+  mutate(week = round(year_day/7))  %>%
+  semi_join(filtered_genes_and_paths_top50, by = c("MAG","dates")) %>%
+  semi_join(counts_filter, by = "Geneid") %>%
+  filter(MAG == "P1994_122_bin236") %>%
+  select(week, Geneid, tpm) %>%
+  spread(Geneid, tpm, fill = 0)
+
+ # Joining in to create the measure.sequence vector to account for uneven sampling points (i.e variation between weeks)
+vec <- all_weeks %>%
+  left_join(mag_time_points, by = "week") %>%
+  column_to_rownames("week") %>%
+  replace(is.na(.), 0) %>%
+  mutate(vector = ifelse(rowSums(.) > 0, 1,0)) %>% #This vector says that if there is a week put a 1, otherwise a 0
+  select(vector)
+
+
+ mag_time_points <- mag_time_points  %>% 
+ column_to_rownames("week") 
+ 
+ # Creating the matrix
+mag_time_points <- for_rain %>%
+  mutate(year_day = julian(dates, origin = as.Date("2016-01-01"))) %>%
+  mutate(week = round(year_day/7))  %>%
+  semi_join(filtered_genes_and_paths_top50, by = c("MAG","dates")) %>%
+  semi_join(counts_filter2, by = "Geneid") %>%
+  filter(MAG == "P1994_122_bin236") %>%
+  select(week, Geneid, tpm) %>%
+  spread(Geneid, tpm, fill = 0) %>%
+  column_to_rownames("week") %>%
+  as.matrix()
+
+
+#Running RAIN
+
+df <- rain::rain(mag_time_points, deltat = 1, period = 52, nr.series = 1 , measure.sequence= vec$vector, adjp.method = "Bonferroni", method = 'longitudinal')
+
+
+#Calulating the coefficient of variation to use as a treshold for plotting.
+
+CV_info <- filtered_genes_and_paths_top50 %>%
+  #inner_join(season_info, by = "Geneid") %>%
+  group_by(Geneid) %>%
+  summarise(CV = (sd(tpm)/mean(tpm)) *100) %>%
+  ungroup() 
+
+df %>%
+  rownames_to_column("Geneid") %>% 
+  inner_join(CV_info, by = "Geneid") %>%
+  mutate(type = ifelse(pVal <= 0.05 & CV >= 20, "sig","non-sig")) %>%
+  write_tsv(.,"../data/cyclical_genes_aphani090.tres.tsv")
+  
+
+cyc.genes.tres <- read_tsv("../data/cyclical_genes_aphani090.tres.tsv")
+```
+
+## Figure S5
+```{r}
+#| label: fig-rain_genes
+#| fig-cap: Z-score normalised expression of Aphanizomenon orfs that were significant in RAIN.
+#| fig-subcap: 
+#|   - "Smoothing function summarising the seasonal clusters"
+#|   - "Plotting every orf individually and colouring it according to the season of highest expression."
+#| warning: false
+
+#Proper way to calculate this would be to do a mean of tpm values per season and then select highest value and assign this season to the gene.
+
+#Seasonal preference as determined by highest seasonal average
+season_info <- filtered_genes_and_paths_top50 %>%
+  select(dates, Geneid, tpm) %>%
+  pivot_wider(names_from = Geneid, values_from = tpm, values_fill = 0) %>%
+  pivot_longer(cols =c(2:ncol(.)) , names_to = "Geneid", values_to = "tpm") %>%
+  inner_join(lmo_id_date %>% distinct(dates, season), by = "dates") %>%
+  semi_join(cyc.genes.tres %>% filter(type == "sig"), by = "Geneid") %>%
+  group_by(Geneid, season) %>%
+  summarise(tpm = mean(tpm)) %>%
+  ungroup() %>%
+  group_by(Geneid) %>%
+  filter(tpm == max(tpm)) %>%
+  ungroup() %>%
+  select(-tpm)
+
+# Unsmoothed version
+filtered_genes_and_paths_top50 %>%
+  inner_join(season_info, by = "Geneid") %>%
+  group_by(Geneid) %>%
+  mutate(zscore = (tpm - mean(tpm))/ sd(tpm) ) %>%
+  ungroup() %>%
+  semi_join(cyc.genes.tres %>% filter(type == "sig"), by = "Geneid") %>%
+  ggplot(mapping = aes(x = dates, y = zscore, colour = season, group = Geneid)) +
+  theme_bw() +
+  geom_line() +
+  scale_colour_manual('Season', values = SEASON_COLOURS)
+
+
+ggsave("../results/RAIN_classification_seasons.png")
+```
+
+## Figure 3
+### Expression dynamics
+
+```{r}
+#| warning: false
+# Calculate tpm based on the total community counts for the LMO-station
+# Calculate within Apha-tpm (already done in the filtered genes and paths)
+
+apha_dyn <- cds_table %>% 
+  inner_join(lmo_id_date, by = "sample") %>%
+  filter(MAG == "P1994_122_bin236") %>%
+  dplyr::filter(filter_frac == "unfiltered") %>%
+  group_by(MAG, sample) %>%
+  summarise(mag_counts = sum(counts)) %>%
+  ungroup() %>%
+  inner_join(assembly_reads, by = "sample") %>%
+  group_by(sample) %>%
+  mutate(apha_fraction = mag_counts/sum(sample_counts)) %>%
+  ungroup() %>%
+  inner_join(lmo_id_date, by = "sample") 
+ 
+  
+# Plot community dynamics
+apha_dyn %>%
+  group_by(dates) %>%
+  summarise(apha_fraction = mean(apha_fraction)) %>%
+  ungroup() %>%
+  ggplot(mapping = aes(x = dates, y = round(apha_fraction*100, digits = 2))) +
+  geom_line() +
+  geom_point() +
+  theme_bw() +
+  theme(axis.text.y = element_text(size = TEXT_SIZE, colour = "black"),
+        axis.text.x = element_text(size = TEXT_SIZE, colour = "black", angle = 60, hjust = 1),
+        axis.title = element_text(size = TEXT_SIZE, colou = "black"),
+        panel.grid = element_blank()) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b",limits = as.Date(c('2016-03-01','2017-12-12'))) +
+  xlab("Month") +
+  ylab(bquote('Aphanizomenon read percentage')) +
+   annotate("rect",
+    xmin = as.Date.character("2016-03-01"),
+    xmax = as.Date.character("2016-06-01"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .1,
+    fill = SEASON_COLOURS["spring"]
+    ) +
+  annotate("rect",
+    xmin = as.Date.character("2016-06-01"),
+    xmax = as.Date.character("2016-09-01"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .1,
+    fill = SEASON_COLOURS["summer"]
+    ) +
+  annotate("rect",
+    xmin = as.Date.character("2016-09-01"),
+    xmax = as.Date.character("2016-12-01"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .1,
+    fill = SEASON_COLOURS["autumn"]
+    ) +
+  annotate("rect",
+    xmin = as.Date.character("2016-12-01"),
+    xmax = as.Date.character("2017-03-01"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .1,
+    fill = SEASON_COLOURS["winter"]
+    ) +
+  annotate("rect",
+    xmin = as.Date.character("2017-03-01"),
+    xmax = as.Date.character("2017-06-01"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .15,
+    fill = SEASON_COLOURS["spring"]
+    ) +
+  annotate("rect",
+    xmin = as.Date.character("2017-06-01"),
+    xmax = as.Date.character("2017-09-01"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .1,
+    fill = SEASON_COLOURS["summer"]
+    ) +
+  annotate("rect",
+    xmin = as.Date.character("2017-09-01"),
+    xmax = as.Date.character("2017-12-01"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .1,
+    fill = SEASON_COLOURS["autumn"]
+    ) +
+        annotate("rect",
+    xmin = as.Date.character("2017-12-01"),
+    xmax = as.Date.character("2017-12-12"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .1,
+    fill = SEASON_COLOURS["winter"]
+    ) +
+  labs(tag = 'a')
+
+ggsave("../results/Apha_Expr_Dyn.pdf")
+
+plotExpr <- ggplot2::last_plot()
+```
+
+### PCA
+
+PCA plotting of Aphanizomenon orf-level expression based on bray-curtis distances of hellinger transformed counts produces a clear separation between summer expression and the three other seasons (@fig-PCA_orf_level). One could take it a step further and separate summer into early- and late summer respectively.
+
+```{r}
+#| label: fig-PCA_orf_level
+#| warning: false
+#| fig-cap: "PCA of orf-level functional expression for Aphanizomenon during years 2016-2017. Colours denote season and shape year."
+
+TEXT_SIZE=10
+orf_mat <- filtered_genes_and_paths_top50 %>%
+  filter(MAG == "P1994_122_bin236") %>%
+  select(dates, Geneid, counts) %>%
+  pivot_wider(names_from ="Geneid", values_from = counts, values_fill = 0) %>%
+  column_to_rownames("dates") %>%
+  as.matrix()
+
+# Hellinger transformation and then bray-curtis distances
+
+PCA <- rda(decostand(orf_mat, method = "hellinger"), distance = "bray")
+
+eigenvalues <- as.data.frame(PCA$CA$eig) %>%
+    rownames_to_column("PC_axes") %>%
+    rename(eigenvalues = "PCA$CA$eig") %>%
+    mutate(eigenvalues_variation_explained = (eigenvalues/sum(eigenvalues) * 100))
+
+pca_df <- as.data.frame(PCA$CA$u) %>%
+  rownames_to_column("dates") %>%
+  mutate(dates = as.Date(dates)) %>%
+  inner_join(lmo_id_date %>% distinct(dates, season), by = "dates") %>%
+  as.data.frame()
+
+pca_df %>%
+  mutate(dates2 = str_extract(dates, "[0-9][0-9]-[0-9][0-9]$")) %>%
+  mutate(year = str_extract(dates, "[0-9][0-9][0-9][0-9]")) %>%
+  ggplot(mapping = aes(x = PC1, y = PC2, text = dates2, colour = season, fill = season, label = dates2, shape = year)) +
+  geom_point(size = 2) +
+  #geom_text(nudge_x = 0.023, size = 3, nudge_y = 0.005, show.legend = FALSE) +
+  geom_text_repel(show.legend = FALSE) +
+  scale_colour_manual('Season',values = SEASON_COLOURS) +
+  scale_fill_manual('Season',values = SEASON_COLOURS) +
+  scale_shape_manual('Year', values = c(16,17)) +
+  xlab(paste("PC1", round(eigenvalues$eigenvalues_variation_explained[1], digits = 2),"%", sep = " ")) +
+  ylab(paste("PC2", round(eigenvalues$eigenvalues_variation_explained[2], digits = 2),"%", sep = " ")) +
+  theme_minimal() +
+  theme(panel.grid = element_blank(),
+        axis.text.y = element_text(size = TEXT_SIZE, colour = "black"),
+        axis.text.x = element_text(size = TEXT_SIZE, colour = "black"),
+        axis.title = element_text(size = TEXT_SIZE, colour = "black"),
+        legend.text = element_text(size = TEXT_SIZE, colour = "black"), 
+        legend.title = element_text(size = TEXT_SIZE, colour = "black", face = "bold"),
+        legend.position = "bottom"
+  ) +
+  geom_vline(xintercept = 0, linetype = "dashed", size = 0.5) +
+  geom_hline(yintercept=0, linetype="dashed", size = 0.5) +
+  geom_convexhull(aes(x = PC1, y = PC2, group = season, fill = season), alpha = 0.2, show.legend = FALSE) +
+  guides(shape=guide_legend(nrow = 1),
+          colour=guide_legend(nrow = 1)) +
+  labs(tag = 'b')
+
+ggsave("../results/Apha_PCoA.png", bg = "white")
+
+p1 <- ggplot2::last_plot()
+```
+
+
+###COG-summary of RAIN seasonal clusters
+
+A COG-functional summary partitioned among the RAIN genes.
+
+```{r}
+#| label: fig-COG_catsRAIN
+#| fig-cap: summarised tpm values of rain and non-rain genes across the different functional COG-categories.
+#| fig-subcap: 
+#|   - "RAIN-genes"
+#|   - "non-RAIN-genes."
+#| warning: false
+
+scale25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+
+filtered_genes_and_paths_top50 %>%
+  semi_join(cyc.genes.tres %>% filter(type == "sig"), by = "Geneid") %>%
+  inner_join(season_info, by = "Geneid") %>%
+  inner_join(eggnog_table %>%
+               distinct(Geneid, COG_Functional_Category,
+                        by = "Geneid")) %>%
+  separate_rows(COG_Functional_Category, sep = "(?<=.)(?=.)") %>%
+  filter(!is.na(COG_Functional_Category)) %>%
+  group_by(dates, COG_Functional_Category, season) %>%
+  summarise(tpm = sum(tpm)) %>%
+  ungroup() %>%
+   inner_join(COG_cats, by = "COG_Functional_Category") %>%
+  mutate(season = case_when(season == "autumn" ~ "Autumn",
+                            season == "summer" ~ "Summer",
+                            season == "winter" ~ "Winter",
+                            season == "spring" ~ "Spring",
+                            TRUE ~ "No")) %>%
+  mutate(season = factor(season, levels = c("Spring", "Summer","Autumn","Winter"))) %>%
+  mutate(full_name = case_when(full_name == "Cell cycle control, cell division, chromosome partitioning" ~ "Cell cycle control, cell division,\n chromosome partitioning",
+                              full_name == "Secondary metabolites biosynthesis, transport and catabolism" ~ "Secondary metabolites biosynthesis,\n transport and catabolism",
+                              full_name == "Posttranslational modification, protein turnover, chaperones" ~ "Posttranslational modification,\nprotein turnover, chaperones",
+                              full_name == "Intracellular trafficking, secretion, and vesicular transport" ~"Intracellular trafficking,\nsecretion, and vesicular transport",
+                              TRUE ~  as.character(full_name))) %>%
+  ggplot(mapping = aes(x = dates, y = tpm/100000, fill = full_name)) +
+  geom_area( ) +
+  theme_bw() +
+  scale_fill_manual('COG category', values = scale25) +
+ #guides(fill = guide_legend(ncol=2, title.position = "top")) +
+  scale_x_date(date_breaks = "2 months", date_labels = "%b",limits = as.Date(c('2016-03-01','2017-12-12'))) +
+  facet_grid(rows = vars(season), space = "free_y", scales = "free") +
+  theme(legend.title = element_text(size = TEXT_SIZE, face = "bold"),
+        legend.text = element_text(size = TEXT_SIZE),
+        legend.key.size = unit(0.3, 'cm'),
+        axis.text.y = element_text(size = TEXT_SIZE),
+        axis.text.x = element_text(size = TEXT_SIZE, angle = 60, hjust = 1),
+        axis.title = element_text(size = TEXT_SIZE),
+        #plot.margin = margin(t = 1, r = 1, b = 0, l = 1, "lines"),
+        #plot.margin=unit(c(0.05,0.05,0.1,-0.48), "cm"),
+        legend.position = "bottom",
+        legend.margin=margin(0,0,0,0),
+        legend.spacing.x = unit(0.01, 'cm'),
+        strip.placement = "outside",
+        strip.text.y = element_markdown(size = TEXT_SIZE, colour = "black", angle = 0),
+        strip.background = element_blank()
+   ) +
+  xlab("Month") +
+  ylab(bquote('Transcripts per million (tpm x'~10^5~')')) +
+  scale_y_continuous(breaks=c(0,0.5,1,2,3,4)) +
+  guides(fill=guide_legend(ncol=2, title.position = "top")) +
+  labs(tag = 'c')
+
+
+p2 <- ggplot2::last_plot()
+
+p2
+ggsave("../results/season_overview.png")
+ggsave("../results/season_overview.pdf")
+```
+
+```{r}
+#| warning: false
+#Combining PCA and RAIN-plot
+
+legend_a <- get_legend(p2 + theme(legend.position = "bottom"))
+
+p2a <- p2 + theme(legend.position = "none")
+
+legend_b <- get_legend(p1 + theme(legend.position = "bottom"))
+
+p1a <- p1 + theme(legend.position = "none")
+
+  layout <- c('
+AAACCC
+BBBCCC
+BBBCCC
+DDDDDD
+EEEEEE
+')
+  
+  plotExpr + 
+  p1a + 
+  p2a  + 
+  legend_b +
+  legend_a +
+  plot_layout(design = layout) 
+  
+  
+   # theme(axis.title = element_text(size = 9))
+
+#& theme( 
+                       #                             legend.key.size = unit(0.4, 'cm'),
+                       #                             legend.title = element_text(size=8)) 
+
+ggsave("../results/PCA_metaT_COG090.png", width = 16, height = 29, units = "cm", dpi = 400)
+#ggsave("../results/PCA_metaT_COG090.pdf", width = 34, height = 24, units = "cm")
+```
+
+
+```{r}
+#| label: tbl-SeasonGeneNumbers
+#| tbl-cap: "Number of genes in each seasonal cluster."
+#| warning: false
+
+season_info %>% 
+  group_by(season) %>%
+  tally() %>%
+  ungroup() %>%
+  arrange(desc(n)) %>%
+  summarise(sum(n))
+
+season_info %>% 
+  group_by(season) %>%
+  tally() %>%
+  ungroup() %>%
+  arrange(desc(n)) 
+```
+
+## Figure 4
+
+```{r}
+#| label: geneVecs
+#| warning: false
+
+#photosystem genes" -" PSI and PS22, look at the modules, as seen by Evangelia" "Genes of interest: PS2 Psb[A-F], PS1 psa[A-O], psaX"
+ PS2 <- c("psbA", "psbB", "psbC", "psbD","psbE", "psbF")
+ PS1 <- c("psaA", "psaB","psaC","psaD","psaE","psaF", "psaG", "psaH","psaI","psaJ","psaK","psaL","psaM","psaN","psaO", "psaX")
+ Antenna_proteins <- c("apcA","apcB", "cpcA", "cpcB", "cpeA","cpeB", "cpeC" , "cpeD", "cpeE", "cpeR", "cpeS", "cpeT", "cpeU", "cpeY", "cpeZ")
+ 
+n_fixation <- c("nifH","nifD") # (The two usually expressed genes, nifH probably only relevant)
+NitMet <- c("nifH","nifD","amtB","urtA")
+c_fixation <- c("rbcL", "cbbL", "cbbM") #(From KEGG pathway, and oown knowledge) "RubisCo""M00165". 
+sunscreen_genes <-  c("scyA","scyB","scyC","scyD","scyE") #scyD is not part of core cassette. (Pichel et al. 2019)
+#"ribosomal genes" - "" # Did not find any sunscreen genes
+Phosphorus_scav_genes <- c("pstS", "pstC", "pstA", "pstB", "phnE","phnC","phoH")
+
+
+# From Ehira and Miyazaki 2015. See refs therein for origin of genes.
+  HeteroDiffGenes <- c("ntcA", "hetR")
+  SigFac  <- c("sigC", "sigE","sigG") #Sigmafactors related to differentitation triggered by N-starvation
+
+# From Österholm et al. 2020 TS2
+  GasVesgenes <- c("gvpW", "gvpV" ,"gvpG","gvpF","gvpK","gvpJ","gvpN","gvpC","gvpA")
+  #toxin genes" - ""
+     Microcystin <- c("mcyH", "mcyI", "mcyF", "mcyE", "mcyJ", "mcyD", "mcyG", "mcyA", "mcyB", "mcyC")
+     Anabaenopeptilide <- c("apdG","apdF","apdE","apdD","apdB", "apdA") #apdBA are pseudogenes
+     Anabaenopeptin <- c("aptE", "aphA","aptD","aptC","aptB","aptA2","aptA1")
+     Anabaenolysin <- c("camA", "ablA", "ablB", "ablC", "ablD", "ablE")
+     Anacyclamide <- c("acyC", "acyB","acyA","acyE","acyF","acyG")
+     Anatoxin_a <- c("anaB", "anaC", "anaD", "anaE", "anaF", "anaG", "anaA")
+     Hassallidin <- c("hasZ", "hasY", "hasX" ,"hasW" ,"hasV" ,"hasU" ,"hasT" ,"hasS" ,"hasR" ,"hasQ" ,"hasP" ,"hasO" ,"hasN" ,"hasM" ,"hasL" ,"hasK" ,"hasJ" ,"hasI" ,"hasH" ,"hasG" ,"hasF" ,"hasE" ,"hasD" ,"hasC" ,"hasB" ,"hasA")
+     Aeruginosin <- c("aerD", "aerE","aerF","aerG1","aerG2","aerA","aerB")  #AerD and AerG1 are pseudogenes
+     Anabaenopeptin_Pseudospumigin_Microviridin <- c("spuF", "spuB", "spuA", "hphB", "hphCD", "aptA", "aptB", "aptC", "aptD", "hphA", "aptE", "mvdA", "mvdB", "mvdC", "mvdE")
+     Geosmin <- c("cnb1","cnb2" , "geoA")
+
+# From Mihali et al. 2008
+  CylindrospermopsinGenes <- c("aoaA","aoaB","aoaC","cyrJ", "cyrA", "cyrB","cyrC", "cyrD", "cyrE", "cyrF", "cyrG", "cyrH", "cyrI", "cyrJ", "cyrK", "cyrL", "cyrM", "cyrN", "cyrO")
+  
+  Circadian <- c("kaiC","kaiB","kaiA") #From what article??
+  
+  #From own data
+CobGenes <- c("cbiA", "cbiD","cobI","cobJ","cobK","cbiM","cobO","cbiQ","cbiT","cobQ","cobT","cobW","cbiX")
+
+FolGenes <- c("folA","folB","folC","folD","folE","folK","folP")
+
+
+OxiStress <- c("gshA","gshB","rbr","dnaJ","dnaJ3","grpE","sodB", "fur")
+
+#Sulfur genes
+
+Sulf <- c("sufB","sufS")
+  
+  #List of genes of interest, also see Ericks list of interesting genes.
+VecOfvecs1 <- c(PS2, PS1, Antenna_proteins, NitMet, c_fixation, sunscreen_genes, Phosphorus_scav_genes, HeteroDiffGenes, SigFac, GasVesgenes,Microcystin, Anabaenopeptilide, Anabaenopeptin, Anabaenolysin, Anacyclamide, Anatoxin_a, Hassallidin, Aeruginosin, Anabaenopeptin_Pseudospumigin_Microviridin, Geosmin, CylindrospermopsinGenes, Circadian, CobGenes, FolGenes, OxiStress, Sulf)
+
+VecOfvecs2 <- c("PS2", "PS1", "Antenna_proteins", "NitMet", "c_fixation", "sunscreen_genes", "Phosphorus_scav_genes", "HeteroDiffGenes", "SigFac", "GasVesgenes", "Microcystin", "Anabaenopeptilide", "Anabaenopeptin", "Anabaenolysin", "Anacyclamide", "Anatoxin_a", "Hassallidin", "Aeruginosin", "Anabaenopeptin_Pseudospumigin_Microviridin", "Geosmin", "CylindrospermopsinGenes","Circadian","CobGenes","FolGenes","OxiStress", "Sulf")
+```
+
+```{r}
+#| warning: false
+#Getting significant info to mutate in on the predicted names in chunk below
+
+SigInfo <- filtered_genes_and_paths_top50 %>%
+  mutate(type = ifelse(
+    Geneid %in% c(
+      cyc.genes.tres %>% filter(type == "sig") %>% distinct(Geneid) %>% pull(Geneid)
+      ), paste0("sig"), paste0("non-sig")
+    )) %>%
+  left_join(eggnog_table %>% distinct(Predicted_protein_name, Geneid), by = "Geneid") %>%
+    mutate(Cats = case_when(Predicted_protein_name %in% PS2 ~ paste0(VecOfvecs2[1]),
+                          Predicted_protein_name %in% PS1 ~ paste0(VecOfvecs2[2]),
+                          Predicted_protein_name %in% Antenna_proteins ~ paste0(VecOfvecs2[3]),
+                          Predicted_protein_name %in% NitMet ~ paste0(VecOfvecs2[4]),
+                          Predicted_protein_name %in% c_fixation ~ paste0(VecOfvecs2[5]),
+                          Predicted_protein_name %in% sunscreen_genes ~ paste0(VecOfvecs2[6]),
+                          Predicted_protein_name %in% Phosphorus_scav_genes ~ paste0(VecOfvecs2[7]),
+                          Predicted_protein_name %in% HeteroDiffGenes ~ paste0(VecOfvecs2[8]),
+                          #Predicted_protein_name %in% SigFac ~ paste0(VecOfvecs2[9]),
+                          Predicted_protein_name %in% GasVesgenes ~ paste0(VecOfvecs2[10]),
+                          Predicted_protein_name %in% Microcystin ~ paste0(VecOfvecs2[11]),
+                          Predicted_protein_name %in% Anabaenopeptilide ~ paste0(VecOfvecs2[12]),
+                          Predicted_protein_name %in% Anabaenopeptin ~ paste0(VecOfvecs2[13]),
+                          Predicted_protein_name %in% Anabaenolysin ~ paste0(VecOfvecs2[14]),
+                          Predicted_protein_name %in% Anacyclamide ~ paste0(VecOfvecs2[15]),
+                          Predicted_protein_name %in% Anatoxin_a ~ paste0(VecOfvecs2[16]),
+                          Predicted_protein_name %in% Hassallidin ~ paste0(VecOfvecs2[17]),
+                          Predicted_protein_name %in% Aeruginosin ~ paste0(VecOfvecs2[18]),
+                          Predicted_protein_name %in% Anabaenopeptin_Pseudospumigin_Microviridin ~ paste0(VecOfvecs2[19]),
+                          Predicted_protein_name %in% Geosmin ~ paste0(VecOfvecs2[20]),
+                          Predicted_protein_name %in% CylindrospermopsinGenes ~ paste0(VecOfvecs2[21]),
+                          Predicted_protein_name %in% Circadian ~ paste0(VecOfvecs2[22]),
+                          Predicted_protein_name %in% CobGenes ~ paste0(VecOfvecs2[23]),
+                          Predicted_protein_name %in% FolGenes ~ paste0(VecOfvecs2[24]),
+                          Predicted_protein_name %in% OxiStress ~ paste0(VecOfvecs2[25]),
+                          Predicted_protein_name %in% Sulf ~ paste0(VecOfvecs2[26]),
+                          TRUE ~ "Other")) %>%
+    filter(Cats != "Other") %>%
+   distinct(Predicted_protein_name, type) %>%
+  filter(type == "sig") %>%
+  pull(Predicted_protein_name)
+   
+
+hmm <- filtered_genes_and_paths_top50 %>%
+  group_by(Geneid, dates) %>%
+  summarise(tpm = sum(tpm)) %>%
+  ungroup() %>%
+  left_join(eggnog_table %>% distinct(Predicted_protein_name, Geneid), by = "Geneid") %>%
+  mutate(Cats = case_when(Predicted_protein_name %in% PS2 ~ paste0(VecOfvecs2[1]),
+                          Predicted_protein_name %in% PS1 ~ paste0(VecOfvecs2[2]),
+                          Predicted_protein_name %in% Antenna_proteins ~ paste0(VecOfvecs2[3]),
+                          Predicted_protein_name %in% NitMet ~ paste0(VecOfvecs2[4]),
+                          Predicted_protein_name %in% c_fixation ~ paste0(VecOfvecs2[5]),
+                          Predicted_protein_name %in% sunscreen_genes ~ paste0(VecOfvecs2[6]),
+                          Predicted_protein_name %in% Phosphorus_scav_genes ~ paste0(VecOfvecs2[7]),
+                          Predicted_protein_name %in% HeteroDiffGenes ~ paste0(VecOfvecs2[8]),
+                          #Predicted_protein_name %in% SigFac ~ paste0(VecOfvecs2[9]),
+                          Predicted_protein_name %in% GasVesgenes ~ paste0(VecOfvecs2[10]),
+                          Predicted_protein_name %in% Microcystin ~ paste0(VecOfvecs2[11]),
+                          Predicted_protein_name %in% Anabaenopeptilide ~ paste0(VecOfvecs2[12]),
+                          Predicted_protein_name %in% Anabaenopeptin ~ paste0(VecOfvecs2[13]),
+                          Predicted_protein_name %in% Anabaenolysin ~ paste0(VecOfvecs2[14]),
+                          Predicted_protein_name %in% Anacyclamide ~ paste0(VecOfvecs2[15]),
+                          Predicted_protein_name %in% Anatoxin_a ~ paste0(VecOfvecs2[16]),
+                          Predicted_protein_name %in% Hassallidin ~ paste0(VecOfvecs2[17]),
+                          Predicted_protein_name %in% Aeruginosin ~ paste0(VecOfvecs2[18]),
+                          Predicted_protein_name %in% Anabaenopeptin_Pseudospumigin_Microviridin ~ paste0(VecOfvecs2[19]),
+                          Predicted_protein_name %in% Geosmin ~ paste0(VecOfvecs2[20]),
+                          Predicted_protein_name %in% CylindrospermopsinGenes ~ paste0(VecOfvecs2[21]),
+                          Predicted_protein_name %in% Circadian ~ paste0(VecOfvecs2[22]),
+                          Predicted_protein_name %in% CobGenes ~ paste0(VecOfvecs2[23]),
+                          Predicted_protein_name %in% FolGenes ~ paste0(VecOfvecs2[24]),
+                          Predicted_protein_name %in% OxiStress ~ paste0(VecOfvecs2[25]),
+                           Predicted_protein_name %in% Sulf ~ paste0(VecOfvecs2[26]),
+                          TRUE ~ "Other")) %>%
+  filter(Cats != "Other") %>%
+   mutate(type = ifelse(Predicted_protein_name %in% SigInfo, paste0("Yes"), paste0("No"))) %>%
+  mutate(Predicted_protein_name = ifelse(Predicted_protein_name %in% SigInfo, paste0("*",Predicted_protein_name,"*"), paste0(Predicted_protein_name))) %>%
+  mutate(Group = paste(Cats, Predicted_protein_name, sep = ".")) %>%
+  select(Geneid, dates, tpm) %>%
+  pivot_wider(values_from = tpm, names_from = Geneid, values_fill  = 0) %>%
+  pivot_longer(c(2:ncol(.)), names_to = "Geneid", values_to = "tpm")
+```
+
+```{r}
+#| warning: false
+trial <- hmm %>%
+  group_by(Geneid, dates) %>%
+  summarise(tpm = sum(tpm)) %>%
+  ungroup() %>%
+  left_join(eggnog_table %>% distinct(Predicted_protein_name, Geneid), by = "Geneid") %>%
+  mutate(Cats = case_when(Predicted_protein_name %in% PS2 ~ paste0(VecOfvecs2[1]),
+                          Predicted_protein_name %in% PS1 ~ paste0(VecOfvecs2[2]),
+                          Predicted_protein_name %in% Antenna_proteins ~ paste0(VecOfvecs2[3]),
+                          Predicted_protein_name %in% NitMet ~ paste0(VecOfvecs2[4]),
+                          Predicted_protein_name %in% c_fixation ~ paste0(VecOfvecs2[5]),
+                          Predicted_protein_name %in% sunscreen_genes ~ paste0(VecOfvecs2[6]),
+                          Predicted_protein_name %in% Phosphorus_scav_genes ~ paste0(VecOfvecs2[7]),
+                          Predicted_protein_name %in% HeteroDiffGenes ~ paste0(VecOfvecs2[8]),
+                          #Predicted_protein_name %in% SigFac ~ paste0(VecOfvecs2[9]),
+                          Predicted_protein_name %in% GasVesgenes ~ paste0(VecOfvecs2[10]),
+                          Predicted_protein_name %in% Microcystin ~ paste0(VecOfvecs2[11]),
+                          Predicted_protein_name %in% Anabaenopeptilide ~ paste0(VecOfvecs2[12]),
+                          Predicted_protein_name %in% Anabaenopeptin ~ paste0(VecOfvecs2[13]),
+                          Predicted_protein_name %in% Anabaenolysin ~ paste0(VecOfvecs2[14]),
+                          Predicted_protein_name %in% Anacyclamide ~ paste0(VecOfvecs2[15]),
+                          Predicted_protein_name %in% Anatoxin_a ~ paste0(VecOfvecs2[16]),
+                          Predicted_protein_name %in% Hassallidin ~ paste0(VecOfvecs2[17]),
+                          Predicted_protein_name %in% Aeruginosin ~ paste0(VecOfvecs2[18]),
+                          Predicted_protein_name %in% Anabaenopeptin_Pseudospumigin_Microviridin ~ paste0(VecOfvecs2[19]),
+                          Predicted_protein_name %in% Geosmin ~ paste0(VecOfvecs2[20]),
+                          Predicted_protein_name %in% CylindrospermopsinGenes ~ paste0(VecOfvecs2[21]),
+                          Predicted_protein_name %in% Circadian ~ paste0(VecOfvecs2[22]),
+                          Predicted_protein_name %in% CobGenes ~ paste0(VecOfvecs2[23]),
+                          Predicted_protein_name %in% FolGenes ~ paste0(VecOfvecs2[24]),
+                          Predicted_protein_name %in% OxiStress ~ paste0(VecOfvecs2[25]),
+                           Predicted_protein_name %in% Sulf ~ paste0(VecOfvecs2[26]),
+                          TRUE ~ "Other")) %>%
+  filter(Cats != "Other") %>%
+   mutate(type = ifelse(
+    Geneid %in% c(cyc.genes.tres %>% filter(type == "sig") %>% distinct(Geneid) %>% pull(Geneid)
+      ), paste0("sig"), paste0("non-sig")
+    )) %>%
+  filter(type == "sig" | Predicted_protein_name %in% c("hetR")) %>%
+  mutate(Predicted_protein_name = paste0("*",Predicted_protein_name,"*")) %>%
+  mutate(Group = paste0("*",Cats,"*"))  %>%
+  mutate(presentable_names = case_when(Cats == "Antenna_proteins" ~ "Antenna proteins",
+                                       Cats == "CobGenes" ~ "Cobalamin metabolism",
+                                       Cats == "OxiStress" ~ "Oxidative stress",
+                                       Cats == "NitMet" ~ "Nitrogen metabolism",
+                                       Cats == "PS1" ~ "Photosystem I",
+                                       Cats == "PS2" ~ "Photosystem II",
+                                       Cats == "FolGenes" ~ "Folate genes",
+                                       Cats == "HeteroDiffGenes" ~ "Heterocyst differentiation",
+                                       Cats == "GasVesgenes" ~ "Gas vesicles",
+                                       Cats == "c_fixation" ~ "Carbon fixation",
+                                       Cats == "Circadian" ~ "Circadian rhythm",
+                                       Cats == "Phosphorus_scav_genes" ~ "Phosphate transport",
+                                       Cats == "Sulf" ~ "Iron-Sulfur biosynthesis",
+                                       TRUE~ paste0(Cats)
+                                       )) %>%
+  mutate(presentable_names = factor(presentable_names, levels = c("Antenna proteins",
+                                                                  "Carbon fixation",
+                                                                  "Nitrogen metabolism",
+                                                                  "Photosystem I",
+                                                                  "Photosystem II",
+                                                                  "Heterocyst differentiation",
+                                                                  "Phosphate transport",
+                                                                  "Oxidative stress",
+                                                                  "Cobalamin metabolism",
+                                                                  "Circadian rhythm",
+                                                                  "Gas vesicles",
+                                                                  #"Folate genes",
+                                                                  "Iron-Sulfur biosynthesis"
+                                                                  
+                                                                  
+                                                                  )))
+```
+
+```{r}
+#| warning: false
+TEXT_SIZE = 10
+scientific <- function(x){
+    ifelse(x==0, "0", parse(text=gsub("[+]", "", gsub("e", "%*%10^", scientific_format()(x)))))
+}
+
+out <- by(data = trial, INDICES = trial$presentable_names, FUN = function(m) {
+      m <- droplevels(m)
+      m <- ggplot(m, aes(dates, tpm, group=Geneid, colour = Predicted_protein_name)) + 
+       geom_line(aes()) +
+        theme_classic() +
+        theme(
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(size =10, hjust = 1, angle = 60, colour = "black"),
+        axis.text.y = element_text(size = 10, colour = "black"),
+        legend.title = element_blank(),
+        legend.text = element_markdown(size = 10),
+        legend.key.size = unit(0.3, 'cm'),
+        #plot.margin = margin(t = 1, r = 1, b = 0, l = 1, "lines"),
+        plot.margin=unit(c(0.05,0.05,0.1,-0.46), "cm"),
+        legend.position = "bottom",
+        legend.box.spacing = unit(0, "pt"),
+        legend.margin=margin(0,0,0,0),
+        legend.spacing.x = unit(0.01, 'cm'),
+        strip.placement = "outside",
+        strip.text = element_markdown(size = 10, colour = "black"),
+        strip.background = element_blank()
+        #legend.box.margin=margin(10,10,10,10)
+    )  +
+        scale_colour_manual('Group', values = GEOM_COL_COLOURS, drop = F) +
+        scale_x_date(date_breaks = "2 months", date_labels = "%b",limits = as.Date(c('2016-03-01','2017-12-12'))) +
+        scale_linetype_manual('Seasonal', values = c(1,2), guide = "none", drop = F) +
+       scale_y_continuous(label=scientific) +
+        ylab("") +
+        facet_wrap(~ presentable_names) +
+  annotate("rect",
+    xmin = as.Date.character("2016-03-01"),
+    xmax = as.Date.character("2016-06-01"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .1,
+    fill = SEASON_COLOURS["spring"]
+    ) +
+  annotate("rect",
+    xmin = as.Date.character("2016-06-01"),
+    xmax = as.Date.character("2016-09-01"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .1,
+    fill = SEASON_COLOURS["summer"]
+    ) +
+  annotate("rect",
+    xmin = as.Date.character("2016-09-01"),
+    xmax = as.Date.character("2016-12-01"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .1,
+    fill = SEASON_COLOURS["autumn"]
+    ) +
+  annotate("rect",
+    xmin = as.Date.character("2016-12-01"),
+    xmax = as.Date.character("2017-03-01"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .1,
+    fill = SEASON_COLOURS["winter"]
+    ) +
+  annotate("rect",
+    xmin = as.Date.character("2017-03-01"),
+    xmax = as.Date.character("2017-05-31"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .15,
+    fill = SEASON_COLOURS["spring"]
+    ) +
+  annotate("rect",
+    xmin = as.Date.character("2017-06-01"),
+    xmax = as.Date.character("2017-09-01"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .1,
+    fill = SEASON_COLOURS["summer"]
+    ) +
+  annotate("rect",
+    xmin = as.Date.character("2017-09-01"),
+    xmax = as.Date.character("2017-12-01"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .1,
+    fill = SEASON_COLOURS["autumn"]
+    ) +
+        annotate("rect",
+    xmin = as.Date.character("2017-12-01"),
+    xmax = as.Date.character("2017-12-12"),
+    ymin = -Inf,
+    ymax = Inf,
+    alpha = .1,
+    fill = SEASON_COLOURS["winter"]
+    ) 
+  
+   })
+
+# If you want to supply the parameters to grid.arrange
+plotobj <- do.call(grid.arrange, c(out, ncol=3))
+
+ggplot2::ggsave("../results/EcoGenesPS2a090Coloured.png", plotobj, height = 18, width = 18, units = "cm")
+```
+
+## Table S4
+```{r}
+#| warning: false
+filtered_genes_and_paths_top50 %>%
+  select(dates, Geneid, tpm) %>%
+  inner_join(eggnog_table %>% distinct(Geneid, Predicted_protein_name), by = "Geneid") %>%
+  left_join(cyc.genes.tres, by = "Geneid") %>%
+  right_join(cds_table %>% distinct(Geneid), by = "Geneid") %>% # here I add genes not included in the RAIN-analysis, to preserve information on full genome
+  write_tsv("../results/orf_tpms090.tsv")
+```
+
+## Correlations
+### metaT-biovolume
+```{r}
+metaT_biovol <- apha_dyn %>%
+  group_by(dates) %>%
+  summarise(apha_fraction = mean(apha_fraction)) %>%
+  ungroup() %>%
+  rename(Date = "dates") %>%
+   inner_join(phytoCount %>% # joining in the biomass
+               #filter(Year != "2020") %>%
+               filter(Genus %in% c("Aphanizomenon")) %>% 
+               group_by(Date, Genus) %>% 
+               summarise(Biovol_mm3_m3 = sum(Biovol_mm3_m3)) %>% 
+               ungroup() %>%
+               select(-Genus),
+             by = "Date"
+  ) %>% 
+  filter(Biovol_mm3_m3 > 0) %>%
+  column_to_rownames("Date") 
+
+
+cor.test(metaT_biovol$apha_fraction, metaT_biovol$Biovol_mm3_m3, method = "pearson", use = "complete.obs")
+```
+
+### MetaT - 16s
+```{r}
+#File created from 16S document
+ASV_biovol_corr <- read_tsv("../data/ASV_biovol_corrDf.tsv")
+
+ASV_metaT_corr <- ASV_biovol_corr %>%
+  select(relab,Date) %>%
+  inner_join(apha_dyn %>%
+    group_by(dates) %>%
+    summarise(apha_fraction = mean(apha_fraction)) %>%
+    ungroup() %>%
+    rename(Date = "dates"),
+    by = "Date") 
+
+
+cor.test(ASV_metaT_corr$relab, ASV_metaT_corr$apha_fraction, method = "pearson",use = "complete.obs")
+```
+
